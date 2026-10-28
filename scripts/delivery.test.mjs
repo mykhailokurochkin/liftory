@@ -27,6 +27,7 @@ import {
   validateCandidate,
 } from './delivery-core.mjs';
 import { buildDeliveryPlist, installDeliveryAgent } from './deploy-host.mjs';
+import { liveDeliveryAdapter } from './delivery.mjs';
 
 const oldCommit = 'a'.repeat(40);
 const newCommit = 'b'.repeat(40);
@@ -72,6 +73,55 @@ function source() {
     releaseWorkflowId: 20,
     ciWorkflowId: 10,
   };
+}
+
+function discovery(sources) {
+  const requests = [];
+  const downloads = [];
+  const adapter = liveDeliveryAdapter(
+    {},
+    {
+      request: async (path) => {
+        requests.push(path);
+        if (path === 'actions/workflows/release.yml')
+          return { id: 20, path: '.github/workflows/release.yml' };
+        if (path === 'actions/workflows/ci.yml')
+          return { id: 10, path: '.github/workflows/ci.yml' };
+        if (
+          path ===
+          'actions/workflows/release.yml/runs?event=workflow_run&status=success&per_page=10'
+        )
+          return { workflow_runs: sources.map((item) => item.release) };
+        for (const item of sources) {
+          if (path === `actions/runs/${item.release.id}/artifacts?per_page=100`)
+            return {
+              artifacts: [
+                { id: item.release.id, name: `liftory-backend-${newCommit}`, expired: false },
+              ],
+            };
+          if (path === `actions/runs/${item.ci.id}`) return item.ci;
+        }
+        throw new Error('Unexpected GitHub API fixture request.');
+      },
+      loadArtifact: async (_paths, artifact) => {
+        downloads.push(artifact.id);
+        const item = sources.find((item) => item.release.id === artifact.id);
+        assert.ok(item, 'download must belong to a listed release');
+        return item.candidate;
+      },
+    },
+  );
+  return { adapter, requests, downloads };
+}
+
+function mainSource() {
+  const item = source();
+  item.candidate.branch = 'main';
+  item.candidate.verifiedRunId = '124';
+  item.release.id = 457;
+  item.ci.id = 124;
+  item.ci.head_branch = 'main';
+  return item;
 }
 
 function config() {
@@ -170,6 +220,50 @@ test('candidate binds trusted release workflow to successful push CI at current 
     change(invalid);
     assert.throws(() => validateCandidate(invalid.candidate, invalid, newCommit));
   }
+});
+
+test('live discovery skips a newer main artifact at the same SHA and finds develop provenance', async () => {
+  const main = mainSource();
+  const develop = source();
+  const f = discovery([main, develop]);
+  const selected = await f.adapter.candidate(newCommit);
+  assert.deepEqual(f.downloads, [main.release.id, develop.release.id]);
+  assert.equal(selected.release.id, develop.release.id);
+  assert.equal(selected.ci.id, develop.ci.id);
+  assert.equal(validateCandidate(selected.candidate, selected, newCommit).branch, 'develop');
+  assert.ok(!f.requests.includes(`actions/runs/${main.ci.id}`));
+});
+
+test('live discovery reports no verified dev release when only a matching main artifact exists', async () => {
+  const main = mainSource();
+  const f = discovery([main]);
+  assert.equal(await f.adapter.candidate(newCommit), null);
+  assert.deepEqual(f.downloads, [main.release.id]);
+});
+
+test('live discovery preserves strict CI provenance and rejects unexpected artifact branches', async () => {
+  for (const alter of [
+    (item) => {
+      item.ci.head_branch = 'main';
+    },
+    (item) => {
+      item.ci.event = 'pull_request';
+    },
+    (item) => {
+      item.candidate.branch = 'unexpected';
+    },
+  ]) {
+    const item = source();
+    alter(item);
+    const selected = await discovery([item]).adapter.candidate(newCommit);
+    assert.throws(() => validateCandidate(selected.candidate, selected, newCommit));
+  }
+  const malformed = source();
+  malformed.candidate.verifiedRunId = '../other';
+  await assert.rejects(
+    discovery([malformed]).adapter.candidate(newCommit),
+    /Invalid verified run ID/,
+  );
 });
 
 test('config replacement changes only image and commit and rejects duplicate or injected fields', () => {

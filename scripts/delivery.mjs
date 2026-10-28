@@ -83,19 +83,19 @@ async function readArtifact(paths, artifact) {
   }
 }
 
-export function liveDeliveryAdapter(paths) {
+export function liveDeliveryAdapter(paths, { request = api, loadArtifact = readArtifact } = {}) {
   return {
     inspect: inspectDevBackend,
     verify: verifyBackend,
     apply: applyBackend,
     async branchHead() {
-      return (await api('git/ref/heads/develop')).object?.sha;
+      return (await request('git/ref/heads/develop')).object?.sha;
     },
     async candidate(commit) {
       const [releaseWorkflow, ciWorkflow, listing] = await Promise.all([
-        api('actions/workflows/release.yml'),
-        api('actions/workflows/ci.yml'),
-        api('actions/workflows/release.yml/runs?event=workflow_run&status=success&per_page=10'),
+        request('actions/workflows/release.yml'),
+        request('actions/workflows/ci.yml'),
+        request('actions/workflows/release.yml/runs?event=workflow_run&status=success&per_page=10'),
       ]);
       if (
         releaseWorkflow.path !== '.github/workflows/release.yml' ||
@@ -104,16 +104,17 @@ export function liveDeliveryAdapter(paths) {
         throw new Error('Unexpected workflow identity.');
       for (const release of listing.workflow_runs ?? []) {
         if (!Number.isSafeInteger(release.id) || release.id < 1) continue;
-        const listing = await api(`actions/runs/${release.id}/artifacts?per_page=100`);
+        const listing = await request(`actions/runs/${release.id}/artifacts?per_page=100`);
         const artifacts = (listing.artifacts ?? []).filter(
           (artifact) => !artifact.expired && artifact.name === `liftory-backend-${commit}`,
         );
         if (!artifacts.length) continue;
         if (artifacts.length !== 1) throw new Error('Ambiguous backend release artifacts.');
-        const candidate = await readArtifact(paths, artifacts[0]);
+        const candidate = await loadArtifact(paths, artifacts[0]);
+        if (candidate?.branch === 'main') continue;
         if (!/^[1-9][0-9]*$/.test(candidate.verifiedRunId))
           throw new Error('Invalid verified run ID.');
-        const ci = await api(`actions/runs/${candidate.verifiedRunId}`);
+        const ci = await request(`actions/runs/${candidate.verifiedRunId}`);
         return {
           candidate,
           release,
