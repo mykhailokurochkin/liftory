@@ -1,6 +1,6 @@
 # Розгортання: Vercel + Pro
 
-Погоджено власником 2026-10-28: Next.js розміщується на Vercel; NestJS, PostgreSQL і майбутній Redis — на домашньому Intel Mac Pro. Liftory має власні Git, збірки та CI/CD. Dev Web опублікований на https://liftory-dev.vercel.app; публічний API та повний авторизований запуск ще не готові. Поточні докази — у [звіті перевірки](verification-2026-10-28.md).
+Погоджено власником 2026-10-28: Next.js розміщується на Vercel; NestJS, PostgreSQL і майбутній Redis — на домашньому Intel Mac Pro. Liftory має власні Git, збірки та CI/CD. Dev https://liftory-dev.vercel.app працює з healthy API/PostgreSQL через власний Funnel. Google callback/token exchange і створення account/session власника підтверджені на сервері; профіль в інтерфейсі та logout ще очікують перевірки. Поточні докази — у [звіті перевірки](verification-2026-10-28.md).
 
 ## Маршрут запиту
 
@@ -10,7 +10,7 @@
                                                PostgreSQL
 ```
 
-Браузер використовує відносні `/api/*` на адресі Vercel. Next.js rewrite передає їх до API на Pro. У браузері зберігається один origin. Перед використанням потрібна реальна перевірка cookies, redirect та поведінки кешу.
+Браузер використовує відносні `/api/*` на адресі Vercel. Next.js rewrite передає їх до API на Pro. У браузері зберігається один origin. На dev перевірені health із точною версією API, приватні session-відповіді без кешування, Google redirect і state cookie. Google account/session створені реально; UI-підтвердження профілю та авторизована синхронізація ще потребують перевірки.
 
 Через тунель публікується лише API; він сам перевіряє авторизацію й власника запису. PostgreSQL та Redis залишаються у приватній Docker-мережі без публічних портів. Redis зараз не реалізований; він планується для черг та фонових AI-задач.
 
@@ -21,7 +21,7 @@
 - Google callback — `${APP_ORIGIN}/api/auth/callback/google`. Vercel передає його на API тим самим rewrite.
 - Google Client Secret, session secret і доступ до PostgreSQL залишаються у приватній конфігурації API на Pro. Вони не потрапляють у браузер або `NEXT_PUBLIC_*`.
 - Dev та prod мають окремі сталі Web-адреси, API, секрети й дані. Випадковий preview deployment не отримує автоматичного доступу до production API.
-- Liftory має власний userspace daemon та нову Tailscale identity на Pro; наявний demo home-server не змінюється. Dev використовує HTTPS 443 → API 3481, prod — HTTPS 8443 → API 3482. Фактичний DNS hostname звіряємо після особистого Tailscale login. Сталі Web origins: https://liftory-dev.vercel.app та https://liftory-app.vercel.app.
+- Liftory має власний userspace daemon та окрему збережену Tailscale identity на Pro; наявний demo home-server не змінюється. Підтверджений hostname — `personal-liftory.tailf02238.ts.net`. Dev використовує HTTPS 443 → API 3481; маршрут увімкнений. Prod HTTPS 8443 → API 3482 залишається вимкненим. Сталі Web origins: https://liftory-dev.vercel.app та https://liftory-app.vercel.app; production Web ще не розгорнутий.
 
 ## Середовища й доставка
 
@@ -33,19 +33,21 @@
 
 Git flow: `feature/* → develop → main`. CI має перевіряти контракти, тести, PWA й збірки до просування релізу. Для Pro потрібен API Docker image платформи `linux/amd64`, незмінний digest, міграція та readiness перед завершенням доставки. Web та API мають незалежні релізи, тому API-зміни повинні залишатися сумісними з попереднім клієнтом, зокрема кешованим offline.
 
-Поточний home-server autodeploy обслуговує лише свій demo. Liftory має власні backend-only Dockerfile/Compose, CI, release workflow та dev controller. Native-тести controller успішні; живі GitHub release, ручна доставка та ввімкнення updater ще попереду. Деталі — у [backend-delivery.md](backend-delivery.md).
+Поточний home-server autodeploy обслуговує лише свій demo. Liftory має власні backend-only Dockerfile/Compose, CI, release workflow та dev controller. [CI 40782859466](https://github.com/mykhailokurochkin/liftory/actions/runs/40782859466) та [release 40783342782](https://github.com/mykhailokurochkin/liftory/actions/runs/40783342782) успішні. Реальний digest-pinned AMD64-образ доставлений вручну на Pro; зовнішній Vercel `/api/health` повернув SHA `dd7343c1a200c9e9b06a89618160ac6042f63135`. Dev updater встановлений і ввімкнений із цим healthy baseline; перший автоматичний GUI tick повернув `already_current` без unknown/error. Автоматичне застосування нового SHA ще не перевірене. Деталі — у [backend-delivery.md](backend-delivery.md).
 
 ## Стан і наступні кроки
 
 Встановлення, lockfile, check/test/build, PostgreSQL integration, Docker smoke та browser offline-сценарії вже перевірені на Pro. Vercel dev build пройшов зі спільними workspace packages і custom service worker build. Прямий `next build` замість `pnpm run build` пакета Web пропускає цей крок.
 
+Google OAuth credentials та allowlist власника налаштовані приватно. Через Vercel підтверджені `googleConfigured: true`, HTTP 401 без авторизації, HTTP 403 для недозволеного origin та правильний Google callback. State cookie має `Secure`, `HttpOnly`, `SameSite=Lax` і не має `Domain`. Свіжий Chrome відкриває `accounts.google.com` із активної кнопки входу.
+
 Потрібно завершити:
 
-1. Перевірку публічного dev Funnel після готовності API. Tailscale login уже підтверджений; `personal-liftory.tailf02238.ts.net` має стан `Running`, а Vercel upstream відповідає цьому hostname. Публічні маршрути поки вимкнені.
-2. Google OAuth client із dev/prod Web callbacks та приватні backend конфігурації на Pro. Redis додається разом із його реальною функцією.
-3. Після дозволу власника — перший commit/push, гілки та справжні GitHub CI/release. Створення workflow не підтверджує проходження hosted jobs.
-4. Ручну backend dev доставку, HTTPS/Funnel, Google login/logout, cookie forwarding через Vercel та відмову чужому акаунту. Власний dev updater уже встановлений у paused режимі; його явне enable потребує перевіреного backend baseline.
-5. Перевірку Safari/PWA на фізичному iPhone та окремий контрольований запуск prod.
+1. Підтвердження профілю в інтерфейсі власником, logout, авторизовану синхронізацію та відмову чужому акаунту.
+2. Доставку наступного scheduled release через уже ввімкнений dev updater.
+3. Safari/PWA на фізичному iPhone та окремий контрольований запуск prod. Production readiness не підтверджена; production Web не розгорнутий, prod Funnel вимкнений.
+
+Redis додається разом із його реальною функцією.
 
 ## Коли Pro недоступний
 

@@ -23,6 +23,13 @@ Check disk before heavy operations. Stop below 10 GiB; do not prune or remove un
 On 2026-10-28 the owner resumed dependency installation and deployment preparation. Heavy installs,
 builds and verification run on Pro; Air remains the source repository and has limited free disk.
 Current evidence and external prerequisites: docs/verification-2026-10-28.md.
-Liftory commits/pushes still require the owner's permission. The home-server autonomous commit grant
-does not apply to Liftory. The public dev frontend is https://liftory-dev.vercel.app; real Google
-OAuth, API publication and live CI/CD are not yet verified.
+The owner explicitly authorized the first Liftory commit/push and necessary fixes to finish the
+current dev Google-login launch. This does not grant blanket permission for future unrelated commits.
+The dev frontend https://liftory-dev.vercel.app reaches the healthy Pro API through its own Funnel;
+the verified API version is dd7343c1a200c9e9b06a89618160ac6042f63135. Hosted CI and the pinned
+AMD64 release passed. Google credentials and the owner allowlist are configured privately; browser
+Google sign-in initialization reaches accounts.google.com with the correct frontend callback.
+Real Google callback/token exchange and owner account/session creation are verified server-side;
+the owner's UI confirmation, logout, physical iPhone/PWA behavior and production remain unverified.
+The dev updater is enabled after the healthy dd7343c baseline; subsequent scheduled release delivery
+remains unverified. Production Funnel stays disabled.
