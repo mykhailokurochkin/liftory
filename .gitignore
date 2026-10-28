@@ -1,0 +1,16 @@
+node_modules/
+.vercel/
+apps/web/public/sw.js
+.env
+.env.*
+!.env.example
+.next/
+dist/
+.turbo/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.DS_Store
+*.log
+.data/

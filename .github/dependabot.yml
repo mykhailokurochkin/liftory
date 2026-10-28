@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: develop
+    schedule: { interval: weekly, day: monday, time: '09:00', timezone: Europe/Kyiv }
+    open-pull-requests-limit: 4
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule: { interval: weekly, day: monday, time: '09:00', timezone: Europe/Kyiv }
+    open-pull-requests-limit: 4
+  - package-ecosystem: docker
+    directory: /
+    target-branch: develop
+    schedule: { interval: weekly, day: monday, time: '09:00', timezone: Europe/Kyiv }
+    open-pull-requests-limit: 4

@@ -1,0 +1,78 @@
+name: Release backend
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: liftory-release-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    env:
+      SOURCE_COMMIT: ${{ github.event.workflow_run.head_sha }}
+      SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Build the verified commit for the Intel host
+        run: |
+          test "$(uname -m)" = x86_64
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/liftory-api"
+          printf 'LIFTORY_RELEASE_IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
+          docker build --target api --build-arg "APP_VERSION=$SOURCE_COMMIT" --tag "$image:sha-$SOURCE_COMMIT" .
+      - name: Publish backend image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$LIFTORY_RELEASE_IMAGE:sha-$SOURCE_COMMIT"
+      - name: Record the immutable delivery candidate
+        run: |
+          mkdir -p release
+          docker image inspect "$LIFTORY_RELEASE_IMAGE:sha-$SOURCE_COMMIT" --format '{{json .RepoDigests}}' > release/repo-digests.json
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+          const env = process.env;
+          const digests = JSON.parse(readFileSync('release/repo-digests.json', 'utf8'));
+          const image = digests.find(value => value.startsWith(env.LIFTORY_RELEASE_IMAGE + '@sha256:'));
+          if (!image || !/^ghcr\.io\/[a-z0-9-]+\/liftory-api@sha256:[a-f0-9]{64}$/.test(image)) throw Error('Missing immutable image digest');
+          if (!/^[a-f0-9]{40}$/.test(env.SOURCE_COMMIT) || !['develop', 'main'].includes(env.SOURCE_BRANCH)) throw Error('Invalid source metadata');
+          writeFileSync('release/backend-release.json', JSON.stringify({
+            schema: 1,
+            repository: env.GITHUB_REPOSITORY,
+            commit: env.SOURCE_COMMIT,
+            branch: env.SOURCE_BRANCH,
+            platform: 'linux/amd64',
+            image,
+            verifiedRunId: env.SOURCE_RUN_ID,
+          }, null, 2) + '\n');
+          rmSync('release/repo-digests.json');
+          JS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: liftory-backend-${{ github.event.workflow_run.head_sha }}
+          path: release/backend-release.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Clear this job's registry login
+        if: always()
+        run: docker logout ghcr.io

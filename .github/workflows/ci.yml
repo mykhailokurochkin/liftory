@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: liftory-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
+        env:
+          POSTGRES_DB: liftory_test
+          POSTGRES_USER: liftory_test
+          POSTGRES_PASSWORD: ci-ephemeral-password
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U liftory_test -d liftory_test" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      CI: 'true'
+      DATABASE_URL: postgresql://liftory_test:ci-ephemeral-password@127.0.0.1:5432/liftory_test
+      TEST_DATABASE_URL: postgresql://liftory_test:ci-ephemeral-password@127.0.0.1:5432/liftory_test
+      NEXT_TELEMETRY_DISABLED: '1'
+      APP_VERSION: ${{ github.sha }}
+      LIFTORY_API_IMAGE: personal-liftory-api:ci
+      LIFTORY_DB_NAME: liftory_runtime_ci
+      LIFTORY_DB_USER: liftory_runtime_ci
+      LIFTORY_DB_PASSWORD: ci-ephemeral-runtime-password
+      LIFTORY_DATABASE_URL: postgresql://liftory_runtime_ci:ci-ephemeral-runtime-password@db:5432/liftory_runtime_ci
+      LIFTORY_PUBLIC_ORIGIN: https://liftory-ci.example.invalid
+      GOOGLE_CLIENT_ID: ci-client.example.invalid
+      GOOGLE_CLIENT_SECRET: ci-placeholder-client-secret
+      ALLOWED_EMAILS: ci@example.invalid
+      LIFTORY_API_PORT: '3481'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: '24', package-manager-cache: false }
+      - name: Install locked dependencies
+        run: |
+          npm install --global pnpm@11.22.0 --ignore-scripts
+          pnpm install --frozen-lockfile
+      - name: Prepare private test environment
+        run: |
+          pnpm run setup:env
+          node -e "console.log('BETTER_AUTH_SECRET='+require('crypto').randomBytes(48).toString('base64url'))" >> "$GITHUB_ENV"
+          pnpm run db:migrate
+      - name: Lint, format and typecheck
+        run: pnpm run check
+      - name: Test contracts, offline persistence and real PostgreSQL
+        run: pnpm run test:coverage
+      - name: Build Web and API
+        run: pnpm run build
+      - name: Install browser and verify mobile workflows
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm run test:e2e
+      - name: Build native AMD64 backend image
+        run: |
+          docker build --target api --build-arg "APP_VERSION=$APP_VERSION" --tag "$LIFTORY_API_IMAGE" .
+      - name: Verify isolated production containers and database readiness
+        run: |
+          docker compose --project-name personal-liftory-ci config --quiet
+          docker compose --project-name personal-liftory-ci up --detach --wait --wait-timeout 120
+          node --input-type=module <<'JS'
+          const response = await fetch('http://127.0.0.1:3481/api/health');
+          const health = await response.json();
+          if (!response.ok || health.status !== 'ok' || health.version !== process.env.APP_VERSION) throw Error('Runtime readiness or version mismatch');
+          const session = await fetch('http://127.0.0.1:3481/api/session').then(r=>r.json());
+          if (session.user !== null || session.development !== false) throw Error('Production must not expose a development identity');
+          JS
+      - name: Remove only this run's runtime containers and volumes
+        if: always()
+        run: docker compose --project-name personal-liftory-ci down --volumes --remove-orphans

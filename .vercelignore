@@ -1,0 +1,15 @@
+.git
+.vercel
+.env
+.env.*
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/coverage
+playwright-report
+test-results
+.data
+apps/web/public/sw.js
+*.log
+**/.DS_Store

@@ -1,0 +1,30 @@
+{
+  "name": "@liftory/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsup --config tsup.config.ts",
+    "start": "node dist/main.mjs",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "@liftory/contracts": "workspace:*",
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/platform-express": "12.3.2",
+    "better-auth": "1.7.14",
+    "drizzle-orm": "0.45.4",
+    "express": "5.2.1",
+    "postgres": "3.4.9",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "@better-auth/drizzle-adapter": "1.7.14"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "tsup": "9.0.0"
+  }
+}

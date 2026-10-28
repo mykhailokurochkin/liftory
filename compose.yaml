@@ -1,0 +1,70 @@
+services:
+  db:
+    image: postgres:18.6-alpine3.24@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
+    environment:
+      POSTGRES_DB: ${LIFTORY_DB_NAME:?Set environment-specific database name}
+      POSTGRES_USER: ${LIFTORY_DB_USER:?Set environment-specific database user}
+      POSTGRES_PASSWORD: ${LIFTORY_DB_PASSWORD:?Set environment-specific database password}
+    volumes:
+      - database:/var/lib/postgresql
+    networks: [database]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 384m
+    cpus: 0.5
+    restart: unless-stopped
+    logging: &logging
+      driver: json-file
+      options: { max-size: 5m, max-file: '2' }
+
+  migrate:
+    image: ${LIFTORY_API_IMAGE:?Set immutable API image}
+    command: ['node', 'dist/migrate.mjs']
+    environment: &api-environment
+      NODE_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: '3301'
+      LIFTORY_DEV_AUTH: 'false'
+      DATABASE_URL: ${LIFTORY_DATABASE_URL:?Set environment-specific database URL}
+      APP_ORIGIN: ${LIFTORY_PUBLIC_ORIGIN:?Set the exact HTTPS origin}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set private session secret}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?Set Google client ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?Set Google client secret}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:?Set allowed Google emails}
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [database]
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=16m']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *logging
+
+  api:
+    image: ${LIFTORY_API_IMAGE:?Set immutable API image}
+    environment: *api-environment
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [database, egress]
+    ports:
+      - '127.0.0.1:${LIFTORY_API_PORT:?Set environment-specific loopback API port}:3301'
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=16m']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  database:
+networks:
+  database:
+    internal: true
+  egress:

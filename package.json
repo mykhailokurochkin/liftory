@@ -1,0 +1,42 @@
+{
+  "name": "@personal-development/liftory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --env-file=.env scripts/dev.mjs",
+    "build": "turbo run build",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "turbo run typecheck",
+    "test": "vitest run && node --test scripts/*.test.mjs apps/web/scripts/*.test.mjs",
+    "test:coverage": "vitest run --coverage && node --test scripts/*.test.mjs apps/web/scripts/*.test.mjs",
+    "test:e2e": "node scripts/e2e-build.mjs && playwright test",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check",
+    "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck",
+    "db:up": "node --env-file=.env scripts/database.mjs up",
+    "db:down": "node --env-file=.env scripts/database.mjs down",
+    "db:migrate": "node --env-file=.env scripts/migrate.mjs",
+    "setup:env": "node scripts/setup-env.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.10.1",
+    "@vitest/coverage-v8": "5.0.5",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.4.3",
+    "fake-indexeddb": "6.2.5",
+    "globals": "17.13.0",
+    "prettier": "3.9.10",
+    "turbo": "2.11.10",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.57.0",
+    "vitest": "5.0.5"
+  }
+}
