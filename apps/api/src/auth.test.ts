@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
-import { inArray } from 'drizzle-orm';
+import { createHmac, randomUUID } from 'node:crypto';
+import { eq, inArray } from 'drizzle-orm';
+import type { SyncMutation } from '@liftory/contracts';
+import { createAuth } from './auth.js';
 import { createApp } from './app.js';
 import { readConfig } from './config.js';
 import { migrateDatabase } from './migrate.js';
-import { verification } from './schema.js';
+import { user, verification } from './schema.js';
 
 describe.skipIf(!process.env.TEST_DATABASE_URL)('anonymous HTTP authentication', () => {
   let runtime: Awaited<ReturnType<typeof createApp>>;
@@ -125,6 +128,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       expect(authorization.searchParams.get('redirect_uri')).toBe(
         applicationOrigin + '/api/auth/callback/google',
       );
+      expect(authorization.searchParams.get('scope')?.split(' ').sort()).toEqual([
+        'email',
+        'openid',
+        'profile',
+      ]);
       expect(state).toBeTruthy();
       const cookies = response.headers.getSetCookie();
       expect(cookies.length).toBeGreaterThan(0);
@@ -168,3 +176,211 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     });
   },
 );
+
+describe.skipIf(!process.env.TEST_DATABASE_URL)('Google registration policies', () => {
+  type Runtime = Awaited<ReturnType<typeof createApp>>;
+  type Authentication = ReturnType<typeof createAuth>;
+  const applicationOrigin = 'https://liftory-public.example.test';
+  const secret = 'test-only-public-registration-secret-long-enough';
+  const allowedEmail = `allowed-${randomUUID()}@example.test`;
+  const fixtureEmails: string[] = [];
+  const runtimes: Runtime[] = [];
+  let publicRuntime: Runtime;
+  let publicAuth: Authentication;
+  let restrictedAuth: Authentication;
+  let publicOrigin: string;
+  let restrictedOrigin: string;
+
+  async function googleIdentity(
+    authentication: Authentication,
+    email = `google-${randomUUID()}@example.test`,
+    emailVerified = true,
+  ) {
+    fixtureEmails.push(email);
+    const context = await authentication.auth.$context;
+    const created = await context.internalAdapter.createOAuthUser(
+      { name: 'Google test user', email, emailVerified },
+      { providerId: 'google', accountId: randomUUID(), scope: 'openid email profile' },
+    );
+    const session = await context.internalAdapter.createSession(created.user.id);
+    const signature = createHmac('sha256', secret).update(session.token).digest('base64');
+    return {
+      user: { id: created.user.id, name: created.user.name, email: created.user.email },
+      cookie:
+        context.authCookies.sessionToken.name +
+        '=' +
+        encodeURIComponent(`${session.token}.${signature}`),
+    };
+  }
+
+  beforeAll(async () => {
+    await migrateDatabase(process.env.TEST_DATABASE_URL!);
+    for (const mode of ['public', 'allowlist'] as const) {
+      const config = readConfig({
+        NODE_ENV: 'production',
+        DATABASE_URL: process.env.TEST_DATABASE_URL,
+        APP_ORIGIN: applicationOrigin,
+        LIFTORY_DEV_AUTH: 'false',
+        BETTER_AUTH_SECRET: secret,
+        GOOGLE_CLIENT_ID: 'fixture.apps.googleusercontent.com',
+        GOOGLE_CLIENT_SECRET: 'fixture-client-secret',
+        REGISTRATION_MODE: mode,
+        ALLOWED_EMAILS: mode === 'allowlist' ? allowedEmail : '',
+      });
+      const runtime = await createApp(config);
+      runtimes.push(runtime);
+      const authentication = createAuth(config, runtime.database);
+      await runtime.app.listen(0, '127.0.0.1');
+      const origin =
+        'http://127.0.0.1:' + (runtime.app.getHttpServer().address() as AddressInfo).port;
+      if (mode === 'public') {
+        publicRuntime = runtime;
+        publicAuth = authentication;
+        publicOrigin = origin;
+      } else {
+        restrictedAuth = authentication;
+        restrictedOrigin = origin;
+      }
+    }
+  });
+
+  afterAll(async () => {
+    try {
+      if (runtimes[0] && fixtureEmails.length)
+        await runtimes[0].database.db.delete(user).where(inArray(user.email, fixtureEmails));
+    } finally {
+      await Promise.all(runtimes.map((runtime) => runtime.close()));
+    }
+  });
+
+  it('registers two verified Google users and isolates their records through authenticated HTTP', async () => {
+    const identities = [await googleIdentity(publicAuth), await googleIdentity(publicAuth)];
+    expect(identities[0].user.id).not.toBe(identities[1].user.id);
+    const sharedRecordId = randomUUID();
+    const sharedMutationId = randomUUID();
+    for (const identity of identities) {
+      const response = await fetch(publicOrigin + '/api/session', {
+        headers: { Cookie: identity.cookie },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        user: identity.user,
+        googleConfigured: true,
+        development: false,
+      });
+      const mutation: SyncMutation = {
+        ownerId: identity.user.id,
+        mutationId: sharedMutationId,
+        baseVersion: 0,
+        entity: {
+          kind: 'exercise',
+          data: {
+            id: sharedRecordId,
+            name: identity.user.email,
+            equipment: 'machine',
+            muscleGroup: 'legs',
+            notes: '',
+            archived: false,
+          },
+        },
+      };
+      const synchronize = (input: SyncMutation) =>
+        fetch(publicOrigin + '/api/sync', {
+          method: 'POST',
+          headers: {
+            Cookie: identity.cookie,
+            Origin: applicationOrigin,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        });
+      const saved = await synchronize(mutation);
+      expect(saved.status).toBe(201);
+      expect(await saved.json()).toMatchObject({
+        mutationId: sharedMutationId,
+        record: { entity: mutation.entity, version: 1 },
+      });
+      const other = identities.find((candidate) => candidate !== identity)!;
+      const forgedRead = await fetch(publicOrigin + '/api/records', {
+        headers: { Cookie: identity.cookie, 'X-Liftory-Owner': other.user.id },
+      });
+      expect(forgedRead.status).toBe(403);
+      expect(await forgedRead.json()).toEqual({ code: 'owner_mismatch' });
+      const forgedWrite = await synchronize({ ...mutation, ownerId: other.user.id });
+      expect(forgedWrite.status).toBe(403);
+      expect(await forgedWrite.json()).toEqual({ code: 'owner_mismatch' });
+    }
+    for (const identity of identities) {
+      const response = await fetch(publicOrigin + '/api/records', {
+        headers: { Cookie: identity.cookie, 'X-Liftory-Owner': identity.user.id },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        records: [
+          expect.objectContaining({
+            version: 1,
+            entity: expect.objectContaining({
+              data: expect.objectContaining({ id: sharedRecordId, name: identity.user.email }),
+            }),
+          }),
+        ],
+      });
+    }
+  });
+
+  it('rejects unverified Google registration without creating a user', async () => {
+    const email = `unverified-${randomUUID()}@example.test`;
+    await expect(googleIdentity(publicAuth, email, false)).rejects.toMatchObject({
+      status: 'FORBIDDEN',
+    });
+    expect(
+      await publicRuntime.database.db.select().from(user).where(eq(user.email, email)),
+    ).toEqual([]);
+  });
+
+  it('rejects an existing session when its email is no longer verified', async () => {
+    const identity = await googleIdentity(publicAuth);
+    await publicRuntime.database.db
+      .update(user)
+      .set({ emailVerified: false })
+      .where(eq(user.id, identity.user.id));
+    const response = await fetch(publicOrigin + '/api/session', {
+      headers: { Cookie: identity.cookie },
+    });
+    expect(await response.json()).toMatchObject({ user: null });
+    expect(
+      (
+        await fetch(publicOrigin + '/api/records', {
+          headers: { Cookie: identity.cookie, 'X-Liftory-Owner': identity.user.id },
+        })
+      ).status,
+    ).toBe(401);
+  });
+
+  it('keeps allowlist registration restricted and denies already-existing outside sessions', async () => {
+    const allowed = await googleIdentity(restrictedAuth, allowedEmail);
+    const accepted = await fetch(restrictedOrigin + '/api/session', {
+      headers: { Cookie: allowed.cookie },
+    });
+    expect(await accepted.json()).toMatchObject({ user: allowed.user });
+    const outsideEmail = `outside-${randomUUID()}@example.test`;
+    await expect(googleIdentity(restrictedAuth, outsideEmail)).rejects.toMatchObject({
+      status: 'FORBIDDEN',
+    });
+    expect(
+      await publicRuntime.database.db.select().from(user).where(eq(user.email, outsideEmail)),
+    ).toEqual([]);
+    const outside = await googleIdentity(publicAuth, outsideEmail);
+    const denied = await fetch(restrictedOrigin + '/api/session', {
+      headers: { Cookie: outside.cookie },
+    });
+    expect(await denied.json()).toMatchObject({ user: null });
+    expect(
+      (
+        await fetch(restrictedOrigin + '/api/records', {
+          headers: { Cookie: outside.cookie, 'X-Liftory-Owner': outside.user.id },
+        })
+      ).status,
+    ).toBe(401);
+  });
+});

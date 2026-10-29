@@ -28,8 +28,11 @@ LIFTORY_PUBLIC_ORIGIN=https://REPLACE_WITH_STABLE_VERCEL_FRONTEND
 BETTER_AUTH_SECRET=REPLACE_WITH_RANDOM_PRIVATE_SESSION_SECRET
 GOOGLE_CLIENT_ID=REPLACE_WITH_GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET=REPLACE_WITH_PRIVATE_GOOGLE_CLIENT_SECRET
+REGISTRATION_MODE=allowlist
 ALLOWED_EMAILS=owner@example.invalid
 ```
+
+`REGISTRATION_MODE` за замовчуванням дорівнює `allowlist`: у розгорнутому backend потрібен непорожній `ALLOWED_EMAILS`. Для відкритої реєстрації вкажи `REGISTRATION_MODE=public`; тоді список може бути порожнім, і доступ мають усі Google-акаунти з підтвердженим email. Саме очищення списку не відкриває доступ. Політика застосовується і до нових користувачів, і до наявних сесій; дані залишаються окремими для кожного власника. Аудиторія Google налаштовується окремо — див. [Google OAuth](google-oauth.md).
 
 `LIFTORY_PUBLIC_ORIGIN` — точний origin Vercel без кінцевого `/`. Google callback використовує саме цю адресу. Для prod змінюються всі дані середовища, порт і секрети. Скрипт перевіряє відповідність URL БД, імен, портів, origin та image digest; секрети не друкує.
 

@@ -8,6 +8,7 @@ export interface ApiConfig {
   secret: string;
   googleClientId?: string;
   googleClientSecret?: string;
+  registrationMode: 'allowlist' | 'public';
   allowedEmails: Set<string>;
   version: string;
 }
@@ -54,6 +55,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const googleClientId = env.GOOGLE_CLIENT_ID?.trim() || undefined;
   const googleClientSecret = env.GOOGLE_CLIENT_SECRET?.trim() || undefined;
   if (!!googleClientId !== !!googleClientSecret) invalid();
+  const registrationMode = env.REGISTRATION_MODE ?? 'allowlist';
+  if (registrationMode !== 'allowlist' && registrationMode !== 'public') return invalid();
   const allowedEmails = new Set(
     (env.ALLOWED_EMAILS ?? '')
       .split(',')
@@ -61,7 +64,12 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       .filter(Boolean),
   );
   if ([...allowedEmails].some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) invalid();
-  if (production && (parsed.protocol !== 'https:' || !googleClientId || allowedEmails.size === 0))
+  if (
+    production &&
+    (parsed.protocol !== 'https:' ||
+      !googleClientId ||
+      (registrationMode === 'allowlist' && allowedEmails.size === 0))
+  )
     invalid();
   return {
     databaseURL,
@@ -73,6 +81,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     secret,
     googleClientId,
     googleClientSecret,
+    registrationMode,
     allowedEmails,
     version: env.APP_VERSION || 'local',
   };

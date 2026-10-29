@@ -25,6 +25,8 @@ describe('API environment boundaries', () => {
     { API_PORT: 'bad' },
     { GOOGLE_CLIENT_ID: 'one-half' },
     { ALLOWED_EMAILS: 'invalid' },
+    { REGISTRATION_MODE: 'anything' },
+    { REGISTRATION_MODE: '' },
   ])('rejects unsafe or incomplete configuration %j', (patch) => {
     expect(() => readConfig({ ...base, ...patch })).toThrow('Invalid API configuration');
   });
@@ -38,11 +40,35 @@ describe('API environment boundaries', () => {
       GOOGLE_CLIENT_SECRET: 'fixture-client-secret',
       ALLOWED_EMAILS: 'Owner@Example.test',
     };
+    expect(readConfig(production).registrationMode).toBe('allowlist');
     expect(readConfig(production).allowedEmails.has('owner@example.test')).toBe(true);
     for (const patch of [
       { APP_ORIGIN: 'http://liftory.example.test' },
       { GOOGLE_CLIENT_SECRET: '' },
       { ALLOWED_EMAILS: '' },
+    ])
+      expect(() => readConfig({ ...production, ...patch })).toThrow();
+  });
+  it('allows public production signup only when explicitly configured', () => {
+    const production = {
+      ...base,
+      NODE_ENV: 'production',
+      LIFTORY_DEV_AUTH: 'false',
+      APP_ORIGIN: 'https://liftory.example.test',
+      GOOGLE_CLIENT_ID: 'fixture.apps.googleusercontent.com',
+      GOOGLE_CLIENT_SECRET: 'fixture-client-secret',
+      REGISTRATION_MODE: 'public',
+    };
+    expect(readConfig(production)).toMatchObject({
+      registrationMode: 'public',
+      allowedEmails: new Set(),
+    });
+    for (const patch of [
+      { REGISTRATION_MODE: undefined },
+      { REGISTRATION_MODE: 'allowlist' },
+      { GOOGLE_CLIENT_SECRET: '' },
+      { APP_ORIGIN: 'http://liftory.example.test' },
+      { LIFTORY_DEV_AUTH: 'true' },
     ])
       expect(() => readConfig({ ...production, ...patch })).toThrow();
   });

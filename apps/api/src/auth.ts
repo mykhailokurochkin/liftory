@@ -14,7 +14,8 @@ export const localUser: AuthUser = {
   email: 'local@example.test',
 };
 export function createAuth(config: ApiConfig, database: Database) {
-  const allowed = (email: string) => config.allowedEmails.has(email.toLowerCase());
+  const allowed = (email: string) =>
+    config.registrationMode === 'public' || config.allowedEmails.has(email.toLowerCase());
   const auth = betterAuth({
     appName: 'Liftory',
     baseURL: config.origin,
