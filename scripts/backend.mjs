@@ -27,8 +27,18 @@ export function validateBackendConfig(values, environment) {
     (values.LIFTORY_DB_PASSWORD?.length ?? 0) < 24 ||
     (values.BETTER_AUTH_SECRET?.length ?? 0) < 32 ||
     !values.GOOGLE_CLIENT_ID ||
-    !values.GOOGLE_CLIENT_SECRET ||
-    !values.ALLOWED_EMAILS
+    !values.GOOGLE_CLIENT_SECRET
+  )
+    invalid();
+  const registrationMode = values.REGISTRATION_MODE ?? 'allowlist';
+  const allowedEmails = (values.ALLOWED_EMAILS ?? '')
+    .split(',')
+    .map((email) => email.trim())
+    .filter(Boolean);
+  if (
+    !['allowlist', 'public'].includes(registrationMode) ||
+    (registrationMode === 'allowlist' && allowedEmails.length === 0) ||
+    allowedEmails.some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
   )
     invalid();
   try {

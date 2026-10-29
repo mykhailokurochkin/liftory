@@ -33,7 +33,8 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set private session secret}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?Set Google client ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?Set Google client secret}
-      ALLOWED_EMAILS: ${ALLOWED_EMAILS:?Set allowed Google emails}
+      REGISTRATION_MODE: ${REGISTRATION_MODE-allowlist}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS-}
     depends_on:
       db: { condition: service_healthy }
     networks: [database]

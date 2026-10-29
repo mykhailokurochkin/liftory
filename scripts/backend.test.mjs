@@ -172,3 +172,18 @@ test('backend core validates native platform before side effects and verifies af
   );
   assert.equal(calls.length, 0);
 });
+
+test('public registration must be explicit and keeps Google required', () => {
+  const values = { ...config(), REGISTRATION_MODE: 'public', ALLOWED_EMAILS: '' };
+  assert.equal(validateBackendConfig(values, 'dev').REGISTRATION_MODE, 'public');
+  for (const patch of [
+    { REGISTRATION_MODE: undefined },
+    { REGISTRATION_MODE: 'allowlist' },
+    { REGISTRATION_MODE: '' },
+    { REGISTRATION_MODE: 'invalid' },
+    { GOOGLE_CLIENT_SECRET: '' },
+    { ALLOWED_EMAILS: 'invalid' },
+  ])
+    assert.throws(() => validateBackendConfig({ ...values, ...patch }, 'dev'));
+  assert.throws(() => validateBackendConfig({ ...config(), ALLOWED_EMAILS: ' , ' }, 'dev'));
+});
