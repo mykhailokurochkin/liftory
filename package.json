@@ -21,6 +21,7 @@
     "db:up": "node --env-file=.env scripts/database.mjs up",
     "db:down": "node --env-file=.env scripts/database.mjs down",
     "db:migrate": "node --env-file=.env scripts/migrate.mjs",
+    "db:migrate:neon": "node --env-file=.env apps/web/scripts/migrate-neon.mjs",
     "setup:env": "node scripts/setup-env.mjs"
   },
   "devDependencies": {

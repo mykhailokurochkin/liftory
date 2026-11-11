@@ -10,9 +10,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@better-auth/drizzle-adapter": "1.7.14",
     "@liftory/contracts": "workspace:*",
     "@liftory/offline": "workspace:*",
+    "better-auth": "1.7.14",
+    "drizzle-orm": "0.45.4",
     "next": "16.4.3",
+    "postgres": "3.4.9",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
