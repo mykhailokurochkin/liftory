@@ -538,6 +538,38 @@ a {
   letter-spacing: 1.5px;
   color: var(--muted);
 }
+.topbar-actions,
+.landing-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lang-switch {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 2px;
+  background: transparent;
+}
+.lang-switch button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  padding: 5px 9px;
+  border-radius: 16px;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
+}
+.lang-switch button.active {
+  background: var(--ink);
+  color: var(--paper);
+}
 .sync-indicator {
   display: flex;
   gap: 8px;

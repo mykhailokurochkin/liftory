@@ -21,6 +21,13 @@ import {
   type LocalRecord,
   type SyncState,
 } from '@liftory/offline';
+import {
+  DEFAULT_LOCALE,
+  LOCALE_STORAGE_KEY,
+  translations,
+  type Locale,
+  type Translations,
+} from '../lib/i18n';
 
 type Tab = 'training' | 'history' | 'exercises' | 'templates' | 'settings';
 type ModalState =
@@ -29,25 +36,11 @@ type ModalState =
   | { type: 'template'; workout: Workout }
   | { type: 'plan'; record?: LocalRecord }
   | null;
-const equipmentNames: Record<Exercise['equipment'], string> = {
-  machine: 'Тренажер',
-  barbell: 'Штанга',
-  dumbbells: 'Гантелі',
-  bodyweight: 'Власна вага',
-  cable: 'Блок',
-  other: 'Інше',
-};
-const navigation: { id: Tab; label: string; icon: string }[] = [
-  { id: 'training', label: 'Тренування', icon: 'activity' },
-  { id: 'history', label: 'Історія', icon: 'calendar' },
-  { id: 'exercises', label: 'Вправи', icon: 'dumbbell' },
-  { id: 'templates', label: 'Плани', icon: 'layers' },
-  { id: 'settings', label: 'Профіль', icon: 'user' },
-];
+
 const initialSync: SyncState = { status: 'idle', pending: 0, conflicts: 0, lastSyncedAt: null };
 const uid = () => crypto.randomUUID();
-const formatDate = (value: string, options?: Intl.DateTimeFormatOptions) =>
-  new Intl.DateTimeFormat('uk-UA', options ?? { day: 'numeric', month: 'long' }).format(
+const formatDate = (value: string, dateLocale: string, options?: Intl.DateTimeFormatOptions) =>
+  new Intl.DateTimeFormat(dateLocale, options ?? { day: 'numeric', month: 'long' }).format(
     new Date(value),
   );
 const cloneExercises = (exercises: WorkoutExercise[]): WorkoutExercise[] =>
@@ -138,7 +131,38 @@ function Icon({ name, size = 20 }: { name: string; size?: number }) {
   );
 }
 
-function Brand({ compact = false }: { compact?: boolean }) {
+function LanguageSwitch({
+  locale,
+  onChange,
+  label,
+}: {
+  locale: Locale;
+  onChange: (next: Locale) => void;
+  label: string;
+}) {
+  return (
+    <div className="lang-switch" role="group" aria-label={label}>
+      <button
+        type="button"
+        className={locale === 'en' ? 'active' : ''}
+        aria-pressed={locale === 'en'}
+        onClick={() => onChange('en')}
+      >
+        EN
+      </button>
+      <button
+        type="button"
+        className={locale === 'uk' ? 'active' : ''}
+        aria-pressed={locale === 'uk'}
+        onClick={() => onChange('uk')}
+      >
+        UA
+      </button>
+    </div>
+  );
+}
+
+function Brand({ tagline, compact = false }: { tagline: string; compact?: boolean }) {
   return (
     <div className="brand">
       <span className="brand-mark" aria-hidden="true">
@@ -148,7 +172,7 @@ function Brand({ compact = false }: { compact?: boolean }) {
       </span>
       <span>
         Liftory<span className="brand-dot">.</span>
-        {!compact && <small>твій тренувальний журнал</small>}
+        {!compact && <small>{tagline}</small>}
       </span>
     </div>
   );
@@ -156,10 +180,12 @@ function Brand({ compact = false }: { compact?: boolean }) {
 
 function Dialog({
   title,
+  closeLabel,
   children,
   close,
 }: {
   title: string;
+  closeLabel: string;
   children: ReactNode;
   close: () => void;
 }) {
@@ -180,7 +206,7 @@ function Dialog({
     >
       <div className="dialog-heading">
         <h2>{title}</h2>
-        <button className="icon-button" onClick={close} aria-label="Закрити">
+        <button className="icon-button" onClick={close} aria-label={closeLabel}>
           <Icon name="close" />
         </button>
       </div>
@@ -190,6 +216,7 @@ function Dialog({
 }
 
 export default function LiftoryApp() {
+  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
   const [store, setStore] = useState<OfflineStore | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [booting, setBooting] = useState(true);
@@ -211,6 +238,43 @@ export default function LiftoryApp() {
   const engine = useRef<ReturnType<typeof createSyncEngine> | null>(null);
   const writeQueue = useRef(Promise.resolve());
   const starting = useRef(false);
+
+  const t = translations[locale];
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+      if (saved === 'en' || saved === 'uk') {
+        setLocaleState(saved);
+      }
+    } catch {
+      /* Ignore storage errors */
+    }
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.title = t.docTitle;
+  }, [locale, t.docTitle]);
+
+  const setLocale = useCallback((next: Locale) => {
+    setLocaleState(next);
+    try {
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, next);
+    } catch {
+      /* Ignore storage errors */
+    }
+  }, []);
+
+  const navigation: { id: Tab; label: string; icon: string }[] = [
+    { id: 'training', label: t.nav.training, icon: 'activity' },
+    { id: 'history', label: t.nav.history, icon: 'calendar' },
+    { id: 'exercises', label: t.nav.exercises, icon: 'dumbbell' },
+    { id: 'templates', label: t.nav.templates, icon: 'layers' },
+    { id: 'settings', label: t.nav.settings, icon: 'user' },
+  ];
 
   useEffect(() => {
     let mounted = true;
@@ -249,10 +313,7 @@ export default function LiftoryApp() {
           }
         }
       } catch {
-        if (mounted)
-          setError(
-            'Не вдалося відкрити сховище пристрою. Перевір доступ до сховища в браузері та перезавантаж сторінку. Незбережені записи не надсилатимуться.',
-          );
+        if (mounted) setError(tRef.current.errors.storageOpen);
       } finally {
         if (mounted) setBooting(false);
       }
@@ -321,7 +382,7 @@ export default function LiftoryApp() {
         });
       })
       .catch(() => {
-        setMessage('Offline-оболонку ще не завантажено. Відкрий застосунок онлайн через HTTPS.');
+        setMessage(tRef.current.errors.offlineShellNotLoaded);
       });
   }, []);
 
@@ -366,20 +427,20 @@ export default function LiftoryApp() {
   );
   const restSeconds = timerEnd ? Math.max(0, Math.ceil((timerEnd - now) / 1000)) : 0;
   const syncLabel = authRequired
-    ? 'Потрібен вхід'
+    ? t.sync.authRequired
     : sync.status === 'error'
-      ? 'Синхронізація призупинена'
+      ? t.sync.paused
       : sync.status === 'syncing'
-        ? 'Синхронізація'
+        ? t.sync.syncing
         : sync.status === 'offline'
-          ? 'Збережено на пристрої'
+          ? t.sync.savedOffline
           : conflicts.length
-            ? 'Потрібна перевірка'
+            ? t.sync.needsReview
             : pending
-              ? `На пристрої · ${pending}`
+              ? t.sync.onDeviceCount(pending)
               : sync.lastSyncedAt
-                ? 'Синхронізовано'
-                : 'Дані на пристрої';
+                ? t.sync.synced
+                : t.sync.onDevice;
 
   function queueWrite(operation: () => Promise<void>): Promise<boolean> {
     const outcome = writeQueue.current.then(async () => {
@@ -389,8 +450,8 @@ export default function LiftoryApp() {
       } catch (cause) {
         setError(
           cause instanceof Error && cause.name === 'StaleRevisionError'
-            ? 'Запис змінився в іншій вкладці. Дані оновлено — повтори свою зміну.'
-            : 'Не вдалося зберегти зміну. Перевір значення та вільне місце браузера. Зміна ще не збережена.',
+            ? tRef.current.errors.staleRevision
+            : tRef.current.errors.saveFailed,
         );
         try {
           await refresh();
@@ -402,9 +463,9 @@ export default function LiftoryApp() {
       try {
         await refresh();
       } catch {
-        setError('Зміна збережена, але список не вдалося оновити. Перезавантаж застосунок.');
+        setError(tRef.current.errors.refreshFailed);
       }
-      setMessage('Збережено на пристрої');
+      setMessage(tRef.current.messages.savedOnDevice);
       try {
         if (typeof BroadcastChannel !== 'undefined') {
           const channel = new BroadcastChannel('liftory-records');
@@ -449,12 +510,12 @@ export default function LiftoryApp() {
       if (existing) {
         setSelectedWorkout(existing.id);
         setTab('training');
-        setMessage('Спочатку заверши поточне тренування');
+        setMessage(t.messages.finishCurrentFirst);
         return;
       }
       const data: Workout = {
         id: uid(),
-        title: source ? ('name' in source ? source.name : source.title) : 'Вільне тренування',
+        title: source ? ('name' in source ? source.name : source.title) : t.training.defaultTitle,
         status: 'active',
         startedAt: new Date().toISOString(),
         finishedAt: null,
@@ -466,7 +527,7 @@ export default function LiftoryApp() {
         setTab('training');
       }
     } catch {
-      setError('Не вдалося відкрити тренування. Локальне сховище недоступне.');
+      setError(t.errors.openWorkoutFailed);
     } finally {
       starting.current = false;
     }
@@ -484,7 +545,7 @@ export default function LiftoryApp() {
       if (!response.ok || typeof result.url !== 'string') throw new Error('login');
       window.location.assign(result.url);
     } catch {
-      setError('Не вдалося почати вхід. Перевір з’єднання та налаштування Google.');
+      setError(t.errors.signInFailed);
     }
   }
 
@@ -503,16 +564,12 @@ export default function LiftoryApp() {
       setAuthRequired(false);
       setTab('training');
     } catch {
-      setError('Вийти можна після відновлення зв’язку із сервером. Локальні записи збережені.');
+      setError(t.errors.signOutFailed);
     }
   }
 
   async function addStarterExercises() {
-    for (const [name, equipment, muscleGroup] of [
-      ['Жим лежачи', 'barbell', 'Груди'],
-      ['Присідання', 'barbell', 'Ноги'],
-      ['Тяга верхнього блока', 'cable', 'Спина'],
-    ] as const)
+    for (const [name, equipment, muscleGroup] of t.exercises.starterList)
       await saveEntity({
         kind: 'exercise',
         data: { id: uid(), name, equipment, muscleGroup, notes: '', archived: false },
@@ -526,15 +583,18 @@ export default function LiftoryApp() {
       .find((exercise) => exercise.exerciseId === exerciseId);
     return previous?.sets
       .filter((set) => set.completed)
-      .map((set) => `${set.weightKg === null ? 'власна вага' : `${set.weightKg} кг`} × ${set.reps}`)
+      .map(
+        (set) =>
+          `${set.weightKg === null ? t.training.bodyweightShort : `${set.weightKg} ${t.training.kgUnit}`} × ${set.reps}`,
+      )
       .join(' · ');
   }
 
   if (booting)
     return (
       <main className="boot-screen">
-        <Brand />
-        <p>Відкриваємо твій журнал…</p>
+        <Brand tagline={t.brandTagline} />
+        <p>{t.booting}</p>
       </main>
     );
 
@@ -542,39 +602,40 @@ export default function LiftoryApp() {
     return (
       <main className="landing">
         <header className="landing-header">
-          <Brand />
-          <span className="eyebrow">ОДИН ПІДХІД ЗА РАЗ</span>
+          <Brand tagline={t.brandTagline} />
+          <div className="landing-header-right">
+            <span className="eyebrow">{t.landing.eyebrow}</span>
+            <LanguageSwitch locale={locale} onChange={setLocale} label={t.languageLabel} />
+          </div>
         </header>
         <section className="landing-grid">
           <div className="landing-copy">
             <span className="pill">
-              <span className="status-dot" /> Твій простір для прогресу
+              <span className="status-dot" /> {t.landing.pill}
             </span>
             <h1>
-              Менше
+              {t.landing.headlineLine1}
               <br />
-              згадувати.
+              {t.landing.headlineLine2}
               <br />
-              <span>Більше робити.</span>
+              <span>{t.landing.headlineAccent}</span>
             </h1>
             <p>
-              Вправи, підходи та маленькі перемоги.
+              {t.landing.subtitleLine1}
               <br />
-              Усе твоє тренування — в одному журналі.
+              {t.landing.subtitleLine2}
             </p>
             <div className="login-card">
-              <h2>Почнемо з твого підходу</h2>
-              <p>Увійди, щоб зберігати тренування між пристроями.</p>
+              <h2>{t.landing.loginTitle}</h2>
+              <p>{t.landing.loginSubtitle}</p>
               <button
                 className="button primary wide"
                 onClick={() => void signIn()}
                 disabled={!googleConfigured}
               >
-                Увійти через Google <Icon name="arrow" />
+                {t.landing.googleButton} <Icon name="arrow" />
               </button>
-              {!googleConfigured && (
-                <p className="helper">Вхід Google ще не активований власником застосунку.</p>
-              )}
+              {!googleConfigured && <p className="helper">{t.landing.googleNotConfigured}</p>}
               {error && (
                 <p role="alert" className="inline-error">
                   {error}
@@ -585,11 +646,11 @@ export default function LiftoryApp() {
           <div className="landing-art" aria-hidden="true">
             <div className="art-orbit" />
             <div className="art-sheet">
-              <span className="eyebrow">СЬОГОДНІ · ТВОЯ РОБОТА</span>
+              <span className="eyebrow">{t.landing.artEyebrow}</span>
               <h3>
-                Сильнішим.
+                {t.landing.artHeadline1}
                 <br />
-                Крок за кроком.
+                {t.landing.artHeadline2}
               </h3>
               <div className="art-bars">
                 {[35, 48, 42, 62, 60, 80, 96].map((height, index) => (
@@ -597,18 +658,18 @@ export default function LiftoryApp() {
                 ))}
               </div>
               <div className="art-caption">
-                <span>Зусилля складаються.</span>
+                <span>{t.landing.artCaption}</span>
                 <span>↗</span>
               </div>
             </div>
             <div className="art-note">
-              <Icon name="check" /> Кожен підхід має значення.
+              <Icon name="check" /> {t.landing.artNote}
             </div>
           </div>
         </section>
         <footer className="landing-footer">
-          <span>СТВОРЕНО ДЛЯ ТВОГО ТЕМПУ</span>
-          <span>Журнал • Плани • Прогрес</span>
+          <span>{t.landing.footerLeft}</span>
+          <span>{t.landing.footerRight}</span>
         </footer>
       </main>
     );
@@ -616,8 +677,8 @@ export default function LiftoryApp() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <Brand />
-        <nav aria-label="Основна навігація">
+        <Brand tagline={t.brandTagline} />
+        <nav aria-label={t.nav.ariaMain}>
           {navigation.map((item) => (
             <button
               key={item.id}
@@ -641,16 +702,18 @@ export default function LiftoryApp() {
           <div className="small-note">
             <span className="tiny-mark">↗</span>
             <p>
-              Твій темп.
+              {t.sidebar.noteLine1}
               <br />
-              <strong>Твій прогрес.</strong>
+              <strong>{t.sidebar.noteLine2}</strong>
             </p>
           </div>
           <button className="profile-button" onClick={() => setTab('settings')}>
-            <span className="avatar">{user.name.slice(0, 1).toUpperCase() || 'Т'}</span>
+            <span className="avatar">
+              {user.name.slice(0, 1).toUpperCase() || t.sidebar.fallbackInitial}
+            </span>
             <span>
-              <strong>{user.name || 'Мій профіль'}</strong>
-              <small>{development ? 'Локальний профіль' : 'Особистий журнал'}</small>
+              <strong>{user.name || t.sidebar.defaultProfileName}</strong>
+              <small>{development ? t.sidebar.localProfile : t.sidebar.personalJournal}</small>
             </span>
             <Icon name="chevron" size={16} />
           </button>
@@ -658,45 +721,43 @@ export default function LiftoryApp() {
       </aside>
       <div className="main-shell">
         <header className="topbar">
-          <span className="topbar-label">ТВІЙ ТРЕНУВАЛЬНИЙ ПРОСТІР</span>
-          <button
-            className={`sync-indicator ${authRequired || conflicts.length || sync.status === 'error' ? 'attention' : ''}`}
-            onClick={() => void engine.current?.sync()}
-            aria-label="Синхронізувати"
-          >
-            <span className={`status-dot ${sync.status === 'syncing' ? 'pulse' : ''}`} />
-            {syncLabel}
-            <Icon name="sync" size={14} />
-          </button>
+          <span className="topbar-label">{t.topbar.label}</span>
+          <div className="topbar-actions">
+            <LanguageSwitch locale={locale} onChange={setLocale} label={t.languageLabel} />
+            <button
+              className={`sync-indicator ${authRequired || conflicts.length || sync.status === 'error' ? 'attention' : ''}`}
+              onClick={() => void engine.current?.sync()}
+              aria-label={t.topbar.syncAria}
+            >
+              <span className={`status-dot ${sync.status === 'syncing' ? 'pulse' : ''}`} />
+              {syncLabel}
+              <Icon name="sync" size={14} />
+            </button>
+          </div>
         </header>
         <main className="workspace">
           {development && (
             <div className="notice subtle">
               <Icon name="user" size={16} />
-              <span>Локальний режим розробки · цей профіль доступний лише на твоєму Mac.</span>
+              <span>{t.notices.devMode}</span>
             </div>
           )}
           {authRequired && (
             <div className="notice">
               <Icon name="cloud" />
-              <span>
-                Можна продовжувати запис на цьому пристрої. Для синхронізації увійди тим самим
-                акаунтом.
-              </span>
+              <span>{t.notices.authOffline}</span>
               <button className="text-button" onClick={() => void signIn()}>
-                Увійти
+                {t.notices.signIn}
               </button>
             </div>
           )}
           {sync.status === 'error' && (
             <div className="notice error" role="alert">
               <span>
-                {sync.error === 'storage'
-                  ? 'Не вдалося прочитати сховище пристрою. Синхронізацію призупинено; успішне збереження нових змін не підтверджене.'
-                  : 'Сервер не підтвердив синхронізацію. Локальні зміни залишаються на цьому пристрої.'}
+                {sync.error === 'storage' ? t.notices.syncStorageError : t.notices.syncServerError}
               </span>
               <button className="text-button" onClick={() => void engine.current?.sync()}>
-                Повторити
+                {t.notices.retry}
               </button>
             </div>
           )}
@@ -706,7 +767,7 @@ export default function LiftoryApp() {
               <button
                 className="icon-button"
                 onClick={() => setError('')}
-                aria-label="Приховати помилку"
+                aria-label={t.notices.hideError}
               >
                 <Icon name="close" size={16} />
               </button>
@@ -715,9 +776,9 @@ export default function LiftoryApp() {
           {conflicts.map((record) => (
             <div className="notice" key={`${record.kind}:${record.id}`}>
               <span>
-                Запис «
-                {'name' in record.entity.data ? record.entity.data.name : record.entity.data.title}»
-                змінено на іншому пристрої. Обидві версії збережені.
+                {t.notices.conflictText(
+                  'name' in record.entity.data ? record.entity.data.name : record.entity.data.title,
+                )}
               </span>
               <button
                 className="text-button"
@@ -727,7 +788,7 @@ export default function LiftoryApp() {
                   })
                 }
               >
-                Взяти серверну
+                {t.notices.takeServer}
               </button>
               {record.kind === 'workout' && (
                 <button
@@ -738,7 +799,7 @@ export default function LiftoryApp() {
                     })
                   }
                 >
-                  Зберегти мою копію
+                  {t.notices.keepCopy}
                 </button>
               )}
             </div>
@@ -749,7 +810,7 @@ export default function LiftoryApp() {
               <div className="page-heading">
                 <div>
                   <p className="eyebrow">
-                    {formatDate(new Date().toISOString(), {
+                    {formatDate(new Date().toISOString(), t.dateLocale, {
                       weekday: 'long',
                       day: 'numeric',
                       month: 'long',
@@ -758,52 +819,60 @@ export default function LiftoryApp() {
                   <h1>
                     {current
                       ? current.status === 'completed'
-                        ? 'Твоя робота.'
-                        : 'Час для підходу.'
-                      : `Привіт, ${user.name.split(' ')[0] || 'атлете'}.`}
+                        ? t.training.completedHeading
+                        : t.training.activeHeading
+                      : t.training.greeting(user.name.split(' ')[0] || t.training.defaultAthlete)}
                   </h1>
                   <p className="page-description">
                     {current
                       ? current.status === 'completed'
-                        ? 'Результат збережений. За потреби виправ підходи нижче.'
-                        : 'Записуй свій темп. Наступний підхід — за тобою.'
-                      : 'Хороший день, щоб стати трохи сильнішим.'}
+                        ? t.training.completedDesc
+                        : t.training.activeDesc
+                      : t.training.homeDesc}
                   </p>
                 </div>
                 {!current && (
                   <button className="button primary" onClick={() => void startWorkout()}>
                     <Icon name="plus" />
-                    Почати тренування
+                    {t.training.startWorkout}
                   </button>
                 )}
               </div>
               {!current ? (
                 <>
                   <div className="stat-grid">
-                    <Stat label="ТРЕНУВАНЬ" value={completed.length} detail="у твоєму журналі" />
-                    <Stat label="ПІДХОДІВ" value={totalSets} detail="вже виконано" />
                     <Stat
-                      label="ВЛАСНИХ ПЛАНІВ"
+                      label={t.training.statWorkoutsLabel}
+                      value={completed.length}
+                      detail={t.training.statWorkoutsDetail}
+                    />
+                    <Stat
+                      label={t.training.statSetsLabel}
+                      value={totalSets}
+                      detail={t.training.statSetsDetail}
+                    />
+                    <Stat
+                      label={t.training.statPlansLabel}
                       value={templates.length}
-                      detail="готові до наступного разу"
+                      detail={t.training.statPlansDetail}
                     />
                   </div>
                   <div className="home-grid">
                     <section className="hero-card">
-                      <span className="eyebrow">ТВОЄ НАСТУПНЕ ТРЕНУВАННЯ</span>
+                      <span className="eyebrow">{t.training.heroEyebrow}</span>
                       <h2>
-                        З’явитися.
+                        {t.training.heroLine1}
                         <br />
-                        Почати.
+                        {t.training.heroLine2}
                         <br />
-                        <em>Зробити своє.</em>
+                        <em>{t.training.heroLine3}</em>
                       </h2>
                       <p>
-                        Додай вправи по ходу або відкрий
-                        <br className="desktop-only" /> свій готовий план.
+                        {t.training.heroBodyLine1}
+                        <br className="desktop-only" /> {t.training.heroBodyLine2}
                       </p>
                       <button className="button dark" onClick={() => void startWorkout()}>
-                        Вільне тренування <Icon name="arrow" />
+                        {t.training.freeWorkout} <Icon name="arrow" />
                       </button>
                       <span className="hero-number" aria-hidden="true">
                         01
@@ -811,9 +880,9 @@ export default function LiftoryApp() {
                     </section>
                     <section className="panel">
                       <div className="section-heading">
-                        <h2>Твої плани</h2>
+                        <h2>{t.training.yourPlans}</h2>
                         <button className="text-button" onClick={() => setTab('templates')}>
-                          Усі <Icon name="arrow" size={16} />
+                          {t.training.all} <Icon name="arrow" size={16} />
                         </button>
                       </div>
                       {templates.length ? (
@@ -826,7 +895,7 @@ export default function LiftoryApp() {
                             <span className="row-number">{String(index + 1).padStart(2, '0')}</span>
                             <span>
                               <strong>{template.name}</strong>
-                              <small>{template.exercises.length} вправ</small>
+                              <small>{t.training.exercisesCount(template.exercises.length)}</small>
                             </span>
                             <Icon name="arrow" />
                           </button>
@@ -834,17 +903,17 @@ export default function LiftoryApp() {
                       ) : (
                         <div className="empty small">
                           <Icon name="layers" size={28} />
-                          <h3>Свій план — свій ритм</h3>
+                          <h3>{t.training.planEmptyTitle}</h3>
                           <p>
-                            Збережи тренування як план,
+                            {t.training.planEmptyLine1}
                             <br />
-                            щоб швидко повторювати його.
+                            {t.training.planEmptyLine2}
                           </p>
                           <button
                             className="text-button"
                             onClick={() => setModal({ type: 'plan' })}
                           >
-                            Створити план <Icon name="arrow" size={16} />
+                            {t.training.createPlan} <Icon name="arrow" size={16} />
                           </button>
                         </div>
                       )}
@@ -852,9 +921,9 @@ export default function LiftoryApp() {
                   </div>
                   <section className="recent-section">
                     <div className="section-heading">
-                      <h2>Останні тренування</h2>
+                      <h2>{t.training.recentWorkouts}</h2>
                       <button className="text-button" onClick={() => setTab('history')}>
-                        Історія <Icon name="arrow" size={16} />
+                        {t.training.history} <Icon name="arrow" size={16} />
                       </button>
                     </div>
                     {completed.length ? (
@@ -862,6 +931,7 @@ export default function LiftoryApp() {
                         <HistoryRow
                           key={workout.id}
                           workout={workout}
+                          t={t}
                           open={() => {
                             setSelectedWorkout(workout.id);
                             setTab('training');
@@ -869,9 +939,7 @@ export default function LiftoryApp() {
                         />
                       ))
                     ) : (
-                      <div className="empty-line">
-                        Тут буде твоя історія. Почни з першого тренування.
-                      </div>
+                      <div className="empty-line">{t.training.recentEmpty}</div>
                     )}
                   </section>
                 </>
@@ -880,11 +948,13 @@ export default function LiftoryApp() {
                   <section className="workout-toolbar">
                     <div>
                       <span className="eyebrow">
-                        {current.status === 'active' ? 'ТРЕНУВАННЯ ТРИВАЄ' : 'ЗАВЕРШЕНЕ ТРЕНУВАННЯ'}
+                        {current.status === 'active'
+                          ? t.training.statusActive
+                          : t.training.statusCompleted}
                       </span>
                       <DraftText
                         id={current.id + '-title'}
-                        label="Назва тренування"
+                        label={t.training.workoutTitleLabel}
                         className="workout-title-input"
                         value={current.title}
                         maxLength={100}
@@ -897,13 +967,15 @@ export default function LiftoryApp() {
                         }}
                       />
                       <span className="muted">
-                        {formatDate(current.startedAt)} · {current.exercises.length} вправ ·{' '}
-                        {current.exercises.reduce(
-                          (sum, exercise) =>
-                            sum + exercise.sets.filter((set) => set.completed).length,
-                          0,
-                        )}{' '}
-                        підходів
+                        {formatDate(current.startedAt, t.dateLocale)} ·{' '}
+                        {t.training.exercisesCount(current.exercises.length)} ·{' '}
+                        {t.training.setsCount(
+                          current.exercises.reduce(
+                            (sum, exercise) =>
+                              sum + exercise.sets.filter((set) => set.completed).length,
+                            0,
+                          ),
+                        )}
                       </span>
                     </div>
                     <div className="toolbar-actions">
@@ -912,7 +984,7 @@ export default function LiftoryApp() {
                         onClick={() => setModal({ type: 'template', workout: current })}
                       >
                         <Icon name="layers" size={18} />
-                        Зберегти план
+                        {t.training.savePlan}
                       </button>
                       {current.status === 'active' && (
                         <button
@@ -925,15 +997,15 @@ export default function LiftoryApp() {
                             }))
                           }
                         >
-                          Завершити <Icon name="check" size={18} />
+                          {t.training.finish} <Icon name="check" size={18} />
                         </button>
                       )}
                     </div>
                   </section>
                   {timerEnd && (
-                    <div className="rest-timer" role="timer" aria-label="Таймер відпочинку">
+                    <div className="rest-timer" role="timer" aria-label={t.training.restTimerAria}>
                       <Icon name="clock" />
-                      <span>Відпочинок</span>
+                      <span>{t.training.restLabel}</span>
                       <strong>
                         {Math.floor(restSeconds / 60)}:{String(restSeconds % 60).padStart(2, '0')}
                       </strong>
@@ -941,12 +1013,12 @@ export default function LiftoryApp() {
                         className="text-button"
                         onClick={() => setTimerEnd((end) => (end ?? Date.now()) + 30000)}
                       >
-                        +30 с
+                        {t.training.add30s}
                       </button>
                       <button
                         className="icon-button"
                         onClick={() => setTimerEnd(null)}
-                        aria-label="Закрити таймер"
+                        aria-label={t.training.closeTimerAria}
                       >
                         <Icon name="close" size={17} />
                       </button>
@@ -957,8 +1029,8 @@ export default function LiftoryApp() {
                       <span className="empty-icon">
                         <Icon name="dumbbell" size={32} />
                       </span>
-                      <h2>Перший підхід починається з вправи</h2>
-                      <p>Обери з каталогу або створи свою вправу.</p>
+                      <h2>{t.training.workoutEmptyTitle}</h2>
+                      <p>{t.training.workoutEmptyText}</p>
                     </div>
                   )}
                   <div className="workout-exercises">
@@ -969,13 +1041,13 @@ export default function LiftoryApp() {
                             {String(index + 1).padStart(2, '0')}
                           </span>
                           <div>
-                            <span className="eyebrow">{equipmentNames[exercise.equipment]}</span>
+                            <span className="eyebrow">{t.equipment[exercise.equipment]}</span>
                             <h2>{exercise.name}</h2>
                           </div>
                           <div className="exercise-actions">
                             <button
                               className="icon-button"
-                              aria-label={`Підняти ${exercise.name}`}
+                              aria-label={t.training.moveUpAria(exercise.name)}
                               disabled={index === 0}
                               onClick={() =>
                                 void changeWorkout(current.id, (workout) => {
@@ -989,7 +1061,7 @@ export default function LiftoryApp() {
                             </button>
                             <button
                               className="icon-button"
-                              aria-label={`Опустити ${exercise.name}`}
+                              aria-label={t.training.moveDownAria(exercise.name)}
                               disabled={index === current.exercises.length - 1}
                               onClick={() =>
                                 void changeWorkout(current.id, (workout) => {
@@ -1003,7 +1075,7 @@ export default function LiftoryApp() {
                             </button>
                             <button
                               className="icon-button"
-                              aria-label={`Прибрати ${exercise.name}`}
+                              aria-label={t.training.removeExerciseAria(exercise.name)}
                               onClick={() =>
                                 void changeWorkout(current.id, (workout) => ({
                                   ...workout,
@@ -1019,15 +1091,16 @@ export default function LiftoryApp() {
                         </div>
                         {previousResult(exercise.exerciseId) && (
                           <p className="previous-result">
-                            Минулого разу <strong>{previousResult(exercise.exerciseId)}</strong>
+                            {t.training.lastTime}{' '}
+                            <strong>{previousResult(exercise.exerciseId)}</strong>
                           </p>
                         )}
                         <div className="set-table">
                           <div className="set-head">
-                            <span>ПІДХІД</span>
-                            <span>ВАГА, КГ</span>
-                            <span>ПОВТОРИ</span>
-                            <span>ГОТОВО</span>
+                            <span>{t.training.setCol}</span>
+                            <span>{t.training.weightCol}</span>
+                            <span>{t.training.repsCol}</span>
+                            <span>{t.training.doneCol}</span>
                             <span />
                           </div>
                           {exercise.sets.map((set, setIndex) => (
@@ -1036,6 +1109,7 @@ export default function LiftoryApp() {
                               set={set}
                               exercise={exercise.name}
                               index={setIndex}
+                              t={t}
                               update={(patch) =>
                                 void changeWorkout(current.id, (workout) => ({
                                   ...workout,
@@ -1114,7 +1188,7 @@ export default function LiftoryApp() {
                           }
                         >
                           <Icon name="plus" size={16} />
-                          Додати підхід
+                          {t.training.addSet}
                         </button>
                       </section>
                     ))}
@@ -1125,17 +1199,17 @@ export default function LiftoryApp() {
                     onClick={() => setModal({ type: 'pick' })}
                   >
                     <Icon name="plus" />
-                    Додати вправу
+                    {t.training.addExercise}
                   </button>
                   <label className="field workout-notes">
-                    Нотатка до тренування
+                    {t.training.workoutNotesLabel}
                     <DraftText
                       id={current.id + '-notes'}
-                      label="Нотатка до тренування"
+                      label={t.training.workoutNotesLabel}
                       value={current.notes}
                       maxLength={2000}
                       multiline
-                      placeholder="Як самопочуття? Що варто запам’ятати?"
+                      placeholder={t.training.workoutNotesPlaceholder}
                       update={(notes) =>
                         void changeWorkout(current.id, (workout) => ({ ...workout, notes }))
                       }
@@ -1143,7 +1217,7 @@ export default function LiftoryApp() {
                   </label>
                   <p className="storage-note">
                     <Icon name="cloud" size={16} />
-                    Підходи зберігаються на пристрої. Синхронізація продовжиться, коли буде зв’язок.
+                    {t.training.storageNote}
                   </p>
                 </>
               )}
@@ -1153,17 +1227,25 @@ export default function LiftoryApp() {
           {tab === 'history' && (
             <>
               <PageHeading
-                eyebrow="КОЖЕН ПІДХІД РАХУЄТЬСЯ"
-                title="Твоя історія."
-                description="Те, що вже зроблено. І те, на чому будується прогрес."
+                eyebrow={t.history.eyebrow}
+                title={t.history.title}
+                description={t.history.description}
               />
               <div className="stat-grid">
-                <Stat label="ТРЕНУВАНЬ" value={completed.length} detail="завершено" />
-                <Stat label="ПІДХОДІВ" value={totalSets} detail="виконано" />
                 <Stat
-                  label="ВПРАВ"
+                  label={t.history.statWorkoutsLabel}
+                  value={completed.length}
+                  detail={t.history.statWorkoutsDetail}
+                />
+                <Stat
+                  label={t.history.statSetsLabel}
+                  value={totalSets}
+                  detail={t.history.statSetsDetail}
+                />
+                <Stat
+                  label={t.history.statExercisesLabel}
                   value={exercises.filter((exercise) => !exercise.archived).length}
-                  detail="у твоєму каталозі"
+                  detail={t.history.statExercisesDetail}
                 />
               </div>
               {workouts.length ? (
@@ -1172,6 +1254,7 @@ export default function LiftoryApp() {
                     <div className="history-item" key={workout.id}>
                       <HistoryRow
                         workout={workout}
+                        t={t}
                         open={() => {
                           setSelectedWorkout(workout.id);
                           setTab('training');
@@ -1181,7 +1264,7 @@ export default function LiftoryApp() {
                         className="text-button repeat-button"
                         onClick={() => void startWorkout(workout)}
                       >
-                        Повторити <Icon name="sync" size={15} />
+                        {t.history.repeat} <Icon name="sync" size={15} />
                       </button>
                     </div>
                   ))}
@@ -1189,11 +1272,11 @@ export default function LiftoryApp() {
               ) : (
                 <Empty
                   icon="calendar"
-                  title="Історія почнеться з першого тренування"
-                  text="Записуй вправи й підходи — вони залишаться тут."
+                  title={t.history.emptyTitle}
+                  text={t.history.emptyText}
                   action={
                     <button className="button primary" onClick={() => void startWorkout()}>
-                      Почати тренування <Icon name="arrow" />
+                      {t.training.startWorkout} <Icon name="arrow" />
                     </button>
                   }
                 />
@@ -1205,21 +1288,21 @@ export default function LiftoryApp() {
             <>
               <div className="page-heading">
                 <div>
-                  <p className="eyebrow">ТВОЯ БАЗА РУХУ</p>
-                  <h1>Вправи.</h1>
-                  <p className="page-description">Від штанги до власної ваги. Збирай свій набір.</p>
+                  <p className="eyebrow">{t.exercises.eyebrow}</p>
+                  <h1>{t.exercises.title}</h1>
+                  <p className="page-description">{t.exercises.description}</p>
                 </div>
                 <button className="button primary" onClick={() => setModal({ type: 'exercise' })}>
                   <Icon name="plus" />
-                  Додати вправу
+                  {t.exercises.addExercise}
                 </button>
               </div>
               <label className="search-field">
-                <span className="sr-only">Пошук вправ</span>
+                <span className="sr-only">{t.exercises.searchSr}</span>
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Знайти вправу або групу м’язів…"
+                  placeholder={t.exercises.searchPlaceholder}
                 />
               </label>
               <div className="catalog-grid">
@@ -1234,10 +1317,10 @@ export default function LiftoryApp() {
                   .map((exercise) => (
                     <article className="catalog-card" key={exercise.id}>
                       <div className="catalog-top">
-                        <span className="equipment-tag">{equipmentNames[exercise.equipment]}</span>
+                        <span className="equipment-tag">{t.equipment[exercise.equipment]}</span>
                         <button
                           className="icon-button"
-                          aria-label={`Редагувати ${exercise.name}`}
+                          aria-label={t.exercises.editAria(exercise.name)}
                           onClick={() =>
                             setModal({
                               type: 'exercise',
@@ -1254,7 +1337,7 @@ export default function LiftoryApp() {
                         <Icon name="dumbbell" size={29} />
                       </div>
                       <h2>{exercise.name}</h2>
-                      <p>{exercise.muscleGroup || 'Групу м’язів не вказано'}</p>
+                      <p>{exercise.muscleGroup || t.exercises.noMuscleGroup}</p>
                       {exercise.notes && <small>{exercise.notes}</small>}
                     </article>
                   ))}
@@ -1262,11 +1345,11 @@ export default function LiftoryApp() {
               {!exercises.some((exercise) => !exercise.archived) && (
                 <Empty
                   icon="dumbbell"
-                  title="Твій набір вправ"
-                  text="Додай улюблену вправу або почни з невеликого базового набору."
+                  title={t.exercises.emptyTitle}
+                  text={t.exercises.emptyText}
                   action={
                     <button className="button secondary" onClick={() => void addStarterExercises()}>
-                      Додати базові вправи <Icon name="plus" />
+                      {t.exercises.addStarter} <Icon name="plus" />
                     </button>
                   }
                 />
@@ -1278,26 +1361,26 @@ export default function LiftoryApp() {
             <>
               <div className="page-heading">
                 <div>
-                  <p className="eyebrow">МЕНШЕ ПІДГОТОВКИ, БІЛЬШЕ РУХУ</p>
-                  <h1>Твої плани.</h1>
-                  <p className="page-description">
-                    Готовий порядок вправ і підходів для наступного разу.
-                  </p>
+                  <p className="eyebrow">{t.templates.eyebrow}</p>
+                  <h1>{t.templates.title}</h1>
+                  <p className="page-description">{t.templates.description}</p>
                 </div>
                 <button className="button primary" onClick={() => setModal({ type: 'plan' })}>
                   <Icon name="plus" />
-                  Створити план
+                  {t.templates.createPlan}
                 </button>
               </div>
               <div className="template-grid">
                 {templates.map((template, index) => (
                   <article className="template-card" key={template.id}>
                     <div className="template-top">
-                      <span className="eyebrow">ПЛАН {String(index + 1).padStart(2, '0')}</span>
+                      <span className="eyebrow">
+                        {t.templates.planBadge(String(index + 1).padStart(2, '0'))}
+                      </span>
                       <div className="template-actions">
                         <button
                           className="icon-button"
-                          aria-label={`Редагувати план ${template.name}`}
+                          aria-label={t.templates.editPlanAria(template.name)}
                           onClick={() =>
                             setModal({
                               type: 'plan',
@@ -1311,7 +1394,7 @@ export default function LiftoryApp() {
                         </button>
                         <button
                           className="icon-button"
-                          aria-label={`Архівувати план ${template.name}`}
+                          aria-label={t.templates.archivePlanAria(template.name)}
                           onClick={() =>
                             void saveEntity(
                               { kind: 'template', data: { ...template, archived: true } },
@@ -1327,23 +1410,24 @@ export default function LiftoryApp() {
                     </div>
                     <h2>{template.name}</h2>
                     <p>
-                      {template.exercises.length} вправ ·{' '}
-                      {template.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0)}{' '}
-                      підходів
+                      {t.training.exercisesCount(template.exercises.length)} ·{' '}
+                      {t.training.setsCount(
+                        template.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0),
+                      )}
                     </p>
                     <div className="template-exercises">
                       {template.exercises.slice(0, 4).map((exercise) => (
                         <span key={exercise.id}>{exercise.name}</span>
                       ))}
                       {template.exercises.length > 4 && (
-                        <span>+ ще {template.exercises.length - 4}</span>
+                        <span>{t.templates.moreExercises(template.exercises.length - 4)}</span>
                       )}
                     </div>
                     <button
                       className="button dark wide"
                       onClick={() => void startWorkout(template)}
                     >
-                      Почати за планом <Icon name="arrow" />
+                      {t.templates.startFromPlan} <Icon name="arrow" />
                     </button>
                   </article>
                 ))}
@@ -1351,11 +1435,11 @@ export default function LiftoryApp() {
               {!templates.length && (
                 <Empty
                   icon="layers"
-                  title="Тренування, яке хочеться повторити"
-                  text="Збери вправи й заплановані підходи у свій шаблон. Також можна зберегти будь-яке тренування як план."
+                  title={t.templates.emptyTitle}
+                  text={t.templates.emptyText}
                   action={
                     <button className="button primary" onClick={() => setModal({ type: 'plan' })}>
-                      Створити перший план <Icon name="plus" />
+                      {t.templates.createFirstPlan} <Icon name="plus" />
                     </button>
                   }
                 />
@@ -1366,62 +1450,61 @@ export default function LiftoryApp() {
           {tab === 'settings' && (
             <>
               <PageHeading
-                eyebrow="ТВІЙ ОСОБИСТИЙ ПРОСТІР"
-                title="Профіль."
-                description="Обліковий запис, збереження й робота без мережі."
+                eyebrow={t.settings.eyebrow}
+                title={t.settings.title}
+                description={t.settings.description}
               />
               <section className="panel profile-panel">
                 <span className="avatar large">{user.name.slice(0, 1).toUpperCase()}</span>
                 <h2>{user.name}</h2>
                 <p>{user.email}</p>
                 <span className="equipment-tag">
-                  {development ? 'Локальна розробка' : 'Google-акаунт'}
+                  {development ? t.settings.localDev : t.settings.googleAccount}
                 </span>
               </section>
               <section className="panel settings-panel">
-                <h2>Збереження та зв’язок</h2>
+                <h2>{t.settings.storageAndSync}</h2>
                 <div className="setting-row">
                   <div>
-                    <strong>Стан синхронізації</strong>
+                    <strong>{t.languageLabel}</strong>
+                    <p>{t.languageDescription}</p>
+                  </div>
+                  <LanguageSwitch locale={locale} onChange={setLocale} label={t.languageLabel} />
+                </div>
+                <div className="setting-row">
+                  <div>
+                    <strong>{t.settings.syncStatus}</strong>
                     <p>
-                      {pending ? `${pending} записів очікують надсилання` : 'Немає змін у черзі'}
+                      {pending ? t.settings.pendingChanges(pending) : t.settings.noPendingChanges}
                     </p>
                   </div>
                   <button className="button secondary" onClick={() => void engine.current?.sync()}>
                     <Icon name="sync" size={17} />
-                    Синхронізувати
+                    {t.settings.syncNow}
                   </button>
                 </div>
                 <div className="setting-row">
                   <div>
-                    <strong>Без інтернету</strong>
+                    <strong>{t.settings.offlineTitle}</strong>
                     <p>
-                      {shellReady
-                        ? 'Offline-оболонка готова на цьому пристрої. '
-                        : 'Offline-оболонка ще не готова. Потрібні HTTPS і перше завантаження онлайн. '}
-                      Відкрий застосунок онлайн хоча б раз. Надалі можна записувати тренування, а
-                      синхронізація відновиться у відкритому застосунку при появі зв’язку.
+                      {shellReady ? t.settings.offlineReady : t.settings.offlineNotReady}
+                      {t.settings.offlineDetail}
                     </p>
                   </div>
                   <Icon name="cloud" />
                 </div>
                 <div className="setting-row">
                   <div>
-                    <strong>Зберігання на пристрої</strong>
-                    <p>
-                      Очищення даних браузера видалить локальні записи. Невідправлені зміни існують
-                      лише на цьому пристрої.
-                    </p>
+                    <strong>{t.settings.deviceStorageTitle}</strong>
+                    <p>{t.settings.deviceStorageDetail}</p>
                   </div>
                 </div>
                 {update && (
                   <div className="setting-row">
                     <div>
-                      <strong>Доступна нова версія</strong>
+                      <strong>{t.settings.updateAvailable}</strong>
                       <p>
-                        {activeCount
-                          ? 'Заверши тренування перед оновленням застосунку.'
-                          : 'Оновлення готове до встановлення.'}
+                        {activeCount ? t.settings.updateBlockedByActive : t.settings.updateReady}
                       </p>
                     </div>
                     <button
@@ -1436,28 +1519,26 @@ export default function LiftoryApp() {
                         );
                       }}
                     >
-                      Оновити
+                      {t.settings.updateAction}
                     </button>
                   </div>
                 )}
               </section>
               {!development && (
                 <button className="button secondary logout-button" onClick={() => void signOut()}>
-                  Вийти з акаунта
+                  {t.settings.signOut}
                 </button>
               )}
-              <p className="storage-note">
-                Невідправлені записи залишаються прив’язаними до цього акаунта після виходу.
-              </p>
+              <p className="storage-note">{t.settings.signOutNote}</p>
             </>
           )}
         </main>
         <footer className="workspace-footer">
-          <span>ОДИН ПІДХІД ЗА РАЗ.</span>
-          <span>Зроблено для твого темпу ↗</span>
+          <span>{t.footer.left}</span>
+          <span>{t.footer.right}</span>
         </footer>
       </div>
-      <nav className="mobile-nav" aria-label="Мобільна навігація">
+      <nav className="mobile-nav" aria-label={t.nav.ariaMobile}>
         {navigation.map((item) => (
           <button
             key={item.id}
@@ -1482,11 +1563,13 @@ export default function LiftoryApp() {
 
       {modal?.type === 'exercise' && (
         <Dialog
-          title={modal.record ? 'Редагувати вправу' : 'Нова вправа'}
+          title={modal.record ? t.modals.editExercise : t.modals.newExercise}
+          closeLabel={t.close}
           close={() => setModal(null)}
         >
           <ExerciseForm
             record={modal.record}
+            t={t}
             save={async (data) => {
               const saved = await saveEntity(
                 { kind: 'exercise', data },
@@ -1499,12 +1582,12 @@ export default function LiftoryApp() {
         </Dialog>
       )}
       {modal?.type === 'pick' && current && (
-        <Dialog title="Додати вправу" close={() => setModal(null)}>
+        <Dialog title={t.modals.addExercise} closeLabel={t.close} close={() => setModal(null)}>
           <label className="search-field">
-            <span className="sr-only">Знайти вправу для тренування</span>
+            <span className="sr-only">{t.modals.findExerciseSr}</span>
             <input
               autoFocus
-              placeholder="Назва вправи…"
+              placeholder={t.modals.exerciseNamePlaceholderShort}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -1547,8 +1630,8 @@ export default function LiftoryApp() {
                   <span>
                     <strong>{exercise.name}</strong>
                     <small>
-                      {equipmentNames[exercise.equipment]} ·{' '}
-                      {exercise.muscleGroup || 'Власна вправа'}
+                      {t.equipment[exercise.equipment]} ·{' '}
+                      {exercise.muscleGroup || t.modals.customExerciseFallback}
                     </small>
                   </span>
                   <Icon name="plus" />
@@ -1563,18 +1646,20 @@ export default function LiftoryApp() {
             }}
           >
             <Icon name="plus" />
-            Створити свою вправу
+            {t.modals.createCustomExercise}
           </button>
         </Dialog>
       )}
       {modal?.type === 'plan' && (
         <Dialog
-          title={modal.record ? 'Редагувати план' : 'Новий план'}
+          title={modal.record ? t.modals.editPlan : t.modals.newPlan}
+          closeLabel={t.close}
           close={() => setModal(null)}
         >
           <PlanEditor
             record={modal.record}
             exercises={exercises.filter((exercise) => !exercise.archived)}
+            t={t}
             save={async (data) => {
               const saved = await saveEntity(
                 { kind: 'template', data },
@@ -1587,9 +1672,10 @@ export default function LiftoryApp() {
         </Dialog>
       )}
       {modal?.type === 'template' && (
-        <Dialog title="Зберегти як план" close={() => setModal(null)}>
+        <Dialog title={t.modals.saveAsPlan} closeLabel={t.close} close={() => setModal(null)}>
           <TemplateForm
             workout={modal.workout}
+            t={t}
             save={async (data) => {
               const saved = await saveEntity({ kind: 'template', data });
               if (saved) setModal(null);
@@ -1652,7 +1738,7 @@ function Empty({
     </div>
   );
 }
-function HistoryRow({ workout, open }: { workout: Workout; open: () => void }) {
+function HistoryRow({ workout, t, open }: { workout: Workout; t: Translations; open: () => void }) {
   const sets = workout.exercises.reduce(
     (sum, exercise) => sum + exercise.sets.filter((set) => set.completed).length,
     0,
@@ -1661,13 +1747,13 @@ function HistoryRow({ workout, open }: { workout: Workout; open: () => void }) {
     <button className="history-row" onClick={open}>
       <span className="history-date">
         <strong>{new Date(workout.startedAt).getDate()}</strong>
-        <small>{formatDate(workout.startedAt, { month: 'short' })}</small>
+        <small>{formatDate(workout.startedAt, t.dateLocale, { month: 'short' })}</small>
       </span>
       <span className="history-info">
         <strong>{workout.title}</strong>
         <small>
-          {workout.exercises.length} вправ · {sets} підходів{' '}
-          {workout.status === 'active' ? '· триває' : ''}
+          {t.training.exercisesCount(workout.exercises.length)} · {t.training.setsCount(sets)}{' '}
+          {workout.status === 'active' ? t.history.inProgressSuffix : ''}
         </small>
       </span>
       <span className="history-complete">
@@ -1727,6 +1813,7 @@ function SetRow({
   set,
   exercise,
   index,
+  t,
   update,
   toggle,
   remove,
@@ -1734,6 +1821,7 @@ function SetRow({
   set: WorkoutSet;
   exercise: string;
   index: number;
+  t: Translations;
   update: (patch: Partial<WorkoutSet>) => void;
   toggle: () => void;
   remove: () => void;
@@ -1760,10 +1848,10 @@ function SetRow({
       <div className={`set-row ${set.completed ? 'done' : ''}`}>
         <span className="set-index">{String(index + 1).padStart(2, '0')}</span>
         <input
-          aria-label={`${exercise}: вага підходу ${index + 1}`}
+          aria-label={t.setRow.weightAria(exercise, index + 1)}
           inputMode="decimal"
           value={weight}
-          placeholder="Власна"
+          placeholder={t.setRow.bodyweightPlaceholder}
           onFocus={() => {
             weightFocused.current = true;
           }}
@@ -1778,11 +1866,11 @@ function SetRow({
           }}
           onBlur={() => {
             weightFocused.current = false;
-            if (!validWeight) setError('Вага: від 0 до 2000 кг');
+            if (!validWeight) setError(t.setRow.weightError);
           }}
         />
         <input
-          aria-label={`${exercise}: повтори підходу ${index + 1}`}
+          aria-label={t.setRow.repsAria(exercise, index + 1)}
           inputMode="numeric"
           value={reps}
           onFocus={() => {
@@ -1799,11 +1887,11 @@ function SetRow({
           }}
           onBlur={() => {
             repsFocused.current = false;
-            if (!validReps) setError('Повтори: ціле число від 1 до 1000');
+            if (!validReps) setError(t.setRow.repsError);
           }}
         />
         <button
-          aria-label={`${exercise}: виконати підхід ${index + 1}`}
+          aria-label={t.setRow.completeAria(exercise, index + 1)}
           aria-pressed={set.completed}
           className={`set-check ${set.completed ? 'checked' : ''}`}
           disabled={!validWeight || !validReps}
@@ -1813,7 +1901,7 @@ function SetRow({
         </button>
         <button
           className="icon-button remove-set"
-          aria-label={`${exercise}: видалити підхід ${index + 1}`}
+          aria-label={t.setRow.deleteAria(exercise, index + 1)}
           onClick={remove}
         >
           <Icon name="close" size={15} />
@@ -1830,9 +1918,11 @@ function SetRow({
 
 function ExerciseForm({
   record,
+  t,
   save,
 }: {
   record?: LocalRecord;
+  t: Translations;
   save: (data: Exercise) => Promise<boolean>;
 }) {
   const existing = record?.entity.kind === 'exercise' ? record.entity.data : null;
@@ -1856,13 +1946,12 @@ function ExerciseForm({
       archived: existing?.archived ?? false,
     });
     if (!result.success) {
-      setError('Вкажи назву вправи (до 100 символів). Перевір довжину інших полів.');
+      setError(t.exerciseForm.nameError);
       return;
     }
     setSaving(true);
     try {
-      if (!(await save(result.data)))
-        setError('Зміна ще не збережена. Перевір доступ до сховища та повтори.');
+      if (!(await save(result.data))) setError(t.exerciseForm.saveError);
     } finally {
       setSaving(false);
     }
@@ -1870,24 +1959,24 @@ function ExerciseForm({
   return (
     <form onSubmit={(event) => void submit(event)} className="form">
       <label className="field">
-        Назва вправи
+        {t.exerciseForm.nameLabel}
         <input
           autoFocus
           required
           maxLength={100}
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="Наприклад, жим ногами — Technogym"
+          placeholder={t.exerciseForm.namePlaceholder}
         />
       </label>
       <div className="form-columns">
         <label className="field">
-          Обладнання
+          {t.exerciseForm.equipmentLabel}
           <select
             value={equipment}
             onChange={(event) => setEquipment(event.target.value as Exercise['equipment'])}
           >
-            {Object.entries(equipmentNames).map(([value, label]) => (
+            {Object.entries(t.equipment).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
               </option>
@@ -1895,22 +1984,22 @@ function ExerciseForm({
           </select>
         </label>
         <label className="field">
-          Група м’язів
+          {t.exerciseForm.muscleGroupLabel}
           <input
             maxLength={60}
             value={muscleGroup}
             onChange={(event) => setMuscleGroup(event.target.value)}
-            placeholder="Наприклад, ноги"
+            placeholder={t.exerciseForm.muscleGroupPlaceholder}
           />
         </label>
       </div>
       <label className="field">
-        Нотатка
+        {t.exerciseForm.notesLabel}
         <textarea
           maxLength={1000}
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
-          placeholder="Налаштування сидіння, особливості техніки…"
+          placeholder={t.exerciseForm.notesPlaceholder}
         />
       </label>
       {error && (
@@ -1919,7 +2008,7 @@ function ExerciseForm({
         </p>
       )}
       <button className="button primary wide" disabled={saving}>
-        {saving ? 'Збереження…' : 'Зберегти вправу'}
+        {saving ? t.exerciseForm.saving : t.exerciseForm.saveButton}
         <Icon name="check" size={18} />
       </button>
       {existing && (
@@ -1928,31 +2017,34 @@ function ExerciseForm({
           className="text-button danger wide"
           onClick={() => void save({ ...existing, archived: true })}
         >
-          Архівувати вправу
+          {t.exerciseForm.archiveButton}
         </button>
       )}
-      <p className="helper">
-        Вправа залишиться у минулих тренуваннях навіть після перейменування або архівації.
-      </p>
+      <p className="helper">{t.exerciseForm.helper}</p>
     </form>
   );
 }
 
 function TemplateForm({
   workout,
+  t,
   save,
 }: {
   workout: Workout;
+  t: Translations;
   save: (data: WorkoutTemplate) => Promise<boolean>;
 }) {
   const [id] = useState(uid);
-  const [name, setName] = useState(workout.title === 'Вільне тренування' ? '' : workout.title);
+  const isDefaultTitle =
+    workout.title === translations.en.training.defaultTitle ||
+    workout.title === translations.uk.training.defaultTitle;
+  const [name, setName] = useState(isDefaultTitle ? '' : workout.title);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!workout.exercises.length) {
-      setError('Спочатку додай хоча б одну вправу до тренування.');
+      setError(t.templateForm.emptyError);
       return;
     }
     const parsed = templateSchema.safeParse({
@@ -1962,38 +2054,35 @@ function TemplateForm({
       archived: false,
     });
     if (!parsed.success) {
-      setError('Вкажи назву плану від 1 до 100 символів.');
+      setError(t.templateForm.nameError);
       return;
     }
     setSaving(true);
     try {
-      if (!(await save(parsed.data)))
-        setError('План ще не збережений. Перевір доступ до сховища та повтори.');
+      if (!(await save(parsed.data))) setError(t.templateForm.saveError);
     } finally {
       setSaving(false);
     }
   }
   return (
     <form className="form" onSubmit={(event) => void submit(event)}>
-      <p className="muted">
-        Збережемо порядок вправ, вагу та кількість повторів. Історія тренування залишиться окремо.
-      </p>
+      <p className="muted">{t.templateForm.description}</p>
       <label className="field">
-        Назва плану
+        {t.templateForm.nameLabel}
         <input
           required
           autoFocus
           maxLength={100}
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="Наприклад, Верх · день А"
+          placeholder={t.templateForm.namePlaceholder}
         />
       </label>
       <div className="template-preview">
         {workout.exercises.map((exercise) => (
           <div key={exercise.id}>
             <span>{exercise.name}</span>
-            <small>{exercise.sets.length} підходів</small>
+            <small>{t.training.setsCount(exercise.sets.length)}</small>
           </div>
         ))}
       </div>
@@ -2003,7 +2092,7 @@ function TemplateForm({
         </p>
       )}
       <button className="button primary wide" disabled={saving}>
-        {saving ? 'Збереження…' : 'Зберегти план'}
+        {saving ? t.templateForm.saving : t.templateForm.saveButton}
         <Icon name="layers" size={18} />
       </button>
     </form>
@@ -2013,10 +2102,12 @@ function TemplateForm({
 function PlanEditor({
   record,
   exercises,
+  t,
   save,
 }: {
   record?: LocalRecord;
   exercises: Exercise[];
+  t: Translations;
   save: (data: WorkoutTemplate) => Promise<boolean>;
 }) {
   const existing = record?.entity.kind === 'template' ? record.entity.data : null;
@@ -2053,7 +2144,7 @@ function PlanEditor({
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!planned.length) {
-      setError('Додай хоча б одну вправу до плану.');
+      setError(t.planEditor.emptyError);
       return;
     }
     const result = templateSchema.safeParse({
@@ -2063,13 +2154,12 @@ function PlanEditor({
       archived: existing?.archived ?? false,
     });
     if (!result.success) {
-      setError('Перевір назву плану, вагу (0–2000 кг) та цілі повтори (1–1000).');
+      setError(t.planEditor.validationError);
       return;
     }
     setSaving(true);
     try {
-      if (!(await save(result.data)))
-        setError('План ще не збережений. Перевір доступ до сховища та повтори.');
+      if (!(await save(result.data))) setError(t.planEditor.saveError);
     } finally {
       setSaving(false);
     }
@@ -2077,24 +2167,24 @@ function PlanEditor({
   return (
     <form className="form" onSubmit={(event) => void submit(event)}>
       <label className="field">
-        Назва плану
+        {t.planEditor.nameLabel}
         <input
           required
           autoFocus
           value={name}
           maxLength={100}
           onChange={(event) => setName(event.target.value)}
-          placeholder="Наприклад, Верх · день А"
+          placeholder={t.planEditor.namePlaceholder}
         />
       </label>
       <label className="field">
-        Додати вправу до плану
+        {t.planEditor.addExerciseLabel}
         <select
           value=""
           onChange={(event) => addExercise(event.target.value)}
           disabled={!exercises.length || planned.length >= 50}
         >
-          <option value="">Обери вправу…</option>
+          <option value="">{t.planEditor.chooseExercise}</option>
           {exercises.map((exercise) => (
             <option key={exercise.id} value={exercise.id}>
               {exercise.name}
@@ -2102,11 +2192,7 @@ function PlanEditor({
           ))}
         </select>
       </label>
-      {!exercises.length && (
-        <p className="helper">
-          Спочатку додай вправи на вкладці «Вправи». Потім повернися до створення плану.
-        </p>
-      )}
+      {!exercises.length && <p className="helper">{t.planEditor.noExercisesHelper}</p>}
       <div className="plan-editor-exercises">
         {planned.map((exercise, index) => (
           <section className="plan-editor-exercise" key={exercise.id}>
@@ -2119,7 +2205,7 @@ function PlanEditor({
                   type="button"
                   className="icon-button"
                   disabled={index === 0}
-                  aria-label={`Підняти у плані ${exercise.name}`}
+                  aria-label={t.planEditor.moveUpAria(exercise.name)}
                   onClick={() =>
                     setPlanned((items) => {
                       const result = [...items];
@@ -2134,7 +2220,7 @@ function PlanEditor({
                   type="button"
                   className="icon-button"
                   disabled={index === planned.length - 1}
-                  aria-label={`Опустити у плані ${exercise.name}`}
+                  aria-label={t.planEditor.moveDownAria(exercise.name)}
                   onClick={() =>
                     setPlanned((items) => {
                       const result = [...items];
@@ -2148,7 +2234,7 @@ function PlanEditor({
                 <button
                   type="button"
                   className="icon-button"
-                  aria-label={`Прибрати з плану ${exercise.name}`}
+                  aria-label={t.planEditor.removeAria(exercise.name)}
                   onClick={() =>
                     setPlanned((items) => items.filter((item) => item.id !== exercise.id))
                   }
@@ -2158,23 +2244,23 @@ function PlanEditor({
               </div>
             </div>
             <div className="plan-set-heading">
-              <span>Підхід</span>
-              <span>Кг</span>
-              <span>Повтори</span>
+              <span>{t.planEditor.setCol}</span>
+              <span>{t.planEditor.kgCol}</span>
+              <span>{t.planEditor.repsCol}</span>
               <span />
             </div>
             {exercise.sets.map((set, setIndex) => (
               <div className="plan-set" key={set.id}>
                 <span>{setIndex + 1}</span>
                 <input
-                  aria-label={`${exercise.name}: планова вага ${setIndex + 1}`}
+                  aria-label={t.planEditor.plannedWeightAria(exercise.name, setIndex + 1)}
                   type="number"
                   inputMode="decimal"
                   min="0"
                   max="2000"
                   step="any"
                   value={set.weightKg ?? ''}
-                  placeholder="Власна"
+                  placeholder={t.setRow.bodyweightPlaceholder}
                   onChange={(event) => {
                     const value = event.target.value === '' ? null : Number(event.target.value);
                     changeExercise(exercise.id, (item) => ({
@@ -2186,7 +2272,7 @@ function PlanEditor({
                   }}
                 />
                 <input
-                  aria-label={`${exercise.name}: планові повтори ${setIndex + 1}`}
+                  aria-label={t.planEditor.plannedRepsAria(exercise.name, setIndex + 1)}
                   type="number"
                   inputMode="numeric"
                   min="1"
@@ -2207,7 +2293,7 @@ function PlanEditor({
                 <button
                   type="button"
                   className="icon-button"
-                  aria-label={`${exercise.name}: прибрати плановий підхід ${setIndex + 1}`}
+                  aria-label={t.planEditor.removePlannedSetAria(exercise.name, setIndex + 1)}
                   onClick={() =>
                     changeExercise(exercise.id, (item) => ({
                       ...item,
@@ -2239,7 +2325,7 @@ function PlanEditor({
               }
             >
               <Icon name="plus" size={15} />
-              Додати плановий підхід
+              {t.planEditor.addPlannedSet}
             </button>
           </section>
         ))}
@@ -2250,12 +2336,10 @@ function PlanEditor({
         </p>
       )}
       <button className="button primary wide" disabled={saving}>
-        {saving ? 'Збереження…' : 'Зберегти план'}
+        {saving ? t.planEditor.saving : t.planEditor.saveButton}
         <Icon name="check" size={18} />
       </button>
-      <p className="helper">
-        План задає орієнтир. Фактичні результати кожного тренування зберігаються окремо.
-      </p>
+      <p className="helper">{t.planEditor.helper}</p>
     </form>
   );
 }

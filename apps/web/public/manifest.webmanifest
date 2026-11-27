@@ -1,9 +1,9 @@
 {
   "id": "/",
-  "name": "Liftory — журнал тренувань",
+  "name": "Liftory — Workout Journal",
   "short_name": "Liftory",
-  "description": "Твій журнал вправ, підходів і прогресу.",
-  "lang": "uk",
+  "description": "Your journal for exercises, sets, and steady progress.",
+  "lang": "en",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

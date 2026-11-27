@@ -2,16 +2,16 @@ import { expect, test } from '@playwright/test';
 
 test('fits the screen and exposes navigation for its viewport', async ({ page }, info) => {
   await page.goto('/');
-  await expect(page.getByText('Локальний режим розробки', { exact: false })).toBeVisible();
+  await expect(page.getByText('Local development mode', { exact: false })).toBeVisible();
   const mobile = info.project.name.startsWith('mobile');
   const navigation = page.getByRole('navigation', {
-    name: mobile ? 'Мобільна навігація' : 'Основна навігація',
+    name: mobile ? 'Mobile navigation' : 'Main navigation',
   });
   await expect(navigation).toBeVisible();
-  for (const name of ['Вправи', 'Плани', 'Профіль', 'Історія', 'Тренування']) {
+  for (const name of ['Exercises', 'Plans', 'Profile', 'History', 'Workouts']) {
     await navigation
       .getByRole('button', {
-        name: name === 'Тренування' ? /^Тренування(?: \d+)?$/ : name,
+        name: name === 'Workouts' ? /^Workouts(?: \d+)?$/ : name,
         exact: true,
       })
       .click();
